@@ -3,7 +3,7 @@ services:
     name: Shopy-api
     runtime: node
     plan: free
-    buildCommand: pnpm install --frozen-lockfile && pnpm --filter @shopy/shared build && pnpm --filter @shopy/api db:generate && pnpm --filter @shopy/api build
+    buildCommand: pnpm install --frozen-lockfile --prod=false && pnpm --filter @shopy/shared build && pnpm --filter @shopy/api db:generate && pnpm --filter @shopy/api build
     startCommand: pnpm --filter @shopy/api start:prod
     envVars:
       - key: NODE_ENV
