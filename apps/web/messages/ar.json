@@ -1,0 +1,79 @@
+{
+  "common": {
+    "save": "حفظ",
+    "cancel": "إلغاء",
+    "delete": "حذف",
+    "search": "بحث...",
+    "loading": "جاري التحميل...",
+    "noResults": "لا توجد نتائج",
+    "actions": "إجراءات",
+    "edit": "تعديل",
+    "view": "عرض",
+    "confirm": "تأكيد",
+    "back": "رجوع",
+    "next": "التالي",
+    "submit": "إرسال",
+    "required": "مطلوب",
+    "optional": "اختياري"
+  },
+  "nav": {
+    "dashboard": "لوحة التحكم",
+    "orders": "الطلبات",
+    "confirmation": "التأكيد",
+    "fulfillment": "التجهيز",
+    "delivery": "التوصيل",
+    "campaigns": "الحملات",
+    "inventory": "المخزون",
+    "finance": "المالية",
+    "team": "الفريق",
+    "settings": "الإعدادات",
+    "ai": "المساعد الذكي"
+  },
+  "auth": {
+    "signIn": "تسجيل الدخول",
+    "signUp": "إنشاء حساب",
+    "signOut": "تسجيل الخروج",
+    "email": "البريد الإلكتروني",
+    "password": "كلمة المرور",
+    "confirmPassword": "تأكيد كلمة المرور",
+    "fullName": "الاسم الكامل",
+    "forgotPassword": "نسيت كلمة المرور؟",
+    "noAccount": "ليس لديك حساب؟",
+    "hasAccount": "لديك حساب بالفعل؟",
+    "welcome": "مرحباً بعودتك",
+    "getStarted": "ابدأ الآن"
+  },
+  "orders": {
+    "title": "الطلبات",
+    "new": "طلب جديد",
+    "status": {
+      "PENDING": "في الانتظار",
+      "CONFIRMED": "مؤكد",
+      "REFUSED": "مرفوض",
+      "CANCELLED": "ملغى",
+      "SHIPPED": "تم الشحن",
+      "DELIVERED": "تم التوصيل",
+      "RETURNED": "مُعاد"
+    }
+  },
+  "confirmation": {
+    "title": "التأكيد",
+    "status": {
+      "PENDING": "في الانتظار",
+      "IN_PROGRESS": "جاري",
+      "CONFIRMED": "مؤكد",
+      "REFUSED": "مرفوض",
+      "UNREACHABLE": "لا يمكن الوصول",
+      "CALL_LATER": "اتصل لاحقاً"
+    }
+  },
+  "roles": {
+    "OWNER": "المالك",
+    "ADMIN": "مدير",
+    "CONFIRMER": "مؤكد",
+    "PACKER": "مُجهِّز",
+    "DELIVERER": "موصِّل",
+    "CAMPAIGN_MANAGER": "مدير الحملات",
+    "VIEWER": "مشاهد"
+  }
+}

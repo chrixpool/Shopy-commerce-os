@@ -1,0 +1,28 @@
+services:
+  - type: web
+    name: Shopy-api
+    runtime: node
+    plan: free
+    buildCommand: pnpm install --frozen-lockfile && pnpm --filter @shopy/shared build && pnpm --filter @shopy/api db:generate && pnpm --filter @shopy/api build
+    startCommand: pnpm --filter @shopy/api start:prod
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 10000
+      - key: DATABASE_URL
+        sync: false
+      - key: DIRECT_URL
+        sync: false
+      - key: AUTH_SECRET
+        sync: false
+      - key: API_INTERNAL_SECRET
+        sync: false
+      - key: CORS_ORIGIN
+        sync: false
+      - key: AI_PROVIDER
+        value: local
+      - key: EMAIL_PROVIDER
+        value: disabled
+      - key: SMS_PROVIDER
+        value: disabled

@@ -1,0 +1,470 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+  engineType = "binary"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ─── ENUMS ─────────────────────────────────────────────────────────────────
+
+enum Role {
+  OWNER
+  ADMIN
+  CONFIRMER
+  PACKER
+  DELIVERER
+  CAMPAIGN_MANAGER
+  VIEWER
+}
+
+enum InvitationStatus {
+  PENDING
+  ACCEPTED
+  EXPIRED
+  REVOKED
+}
+
+enum OrderStatus {
+  PENDING
+  CONFIRMED
+  REFUSED
+  CANCELLED
+  SHIPPED
+  DELIVERED
+  RETURNED
+}
+
+enum ConfirmationStatus {
+  PENDING
+  IN_PROGRESS
+  CONFIRMED
+  REFUSED
+  UNREACHABLE
+  CALL_LATER
+}
+
+enum FulfillmentStatus {
+  TO_PACK
+  PACKING
+  PACKED
+}
+
+enum DeliveryStatus {
+  PENDING_PICKUP
+  PICKED_UP
+  IN_TRANSIT
+  OUT_FOR_DELIVERY
+  DELIVERED
+  FAILED_ATTEMPT
+  RETURNED
+}
+
+// ─── AUTH (Auth.js v5 required tables) ──────────────────────────────────────
+
+model User {
+  id            String    @id @default(cuid())
+  name          String?
+  email         String    @unique
+  emailVerified DateTime?
+  image         String?
+  passwordHash  String?
+
+  role           Role         @default(VIEWER)
+  organizationId String?
+  organization   Organization? @relation(fields: [organizationId], references: [id])
+
+  accounts Account[]
+  sessions Session[]
+
+  // Business relations
+  confirmationTasksAssigned ConfirmationTask[] @relation("AssignedConfirmer")
+  fulfillmentTasksAssigned  FulfillmentTask[]  @relation("AssignedPacker")
+  orderEventsCreated        OrderEvent[]
+  invitationsSent           Invitation[]       @relation("InvitedBy")
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([organizationId])
+}
+
+model Account {
+  id                String  @id @default(cuid())
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String? @db.Text
+  access_token      String? @db.Text
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String? @db.Text
+  session_state     String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+
+  @@unique([identifier, token])
+}
+
+// ─── ORGANIZATION ──────────────────────────────────────────────────────────
+
+model Organization {
+  id   String @id @default(cuid())
+  name String
+  slug String @unique
+
+  users       User[]
+  invitations Invitation[]
+  integrations Integration[]
+  orders      Order[]
+  products    Product[]
+  customers   Customer[]
+  campaigns   Campaign[]
+  automations Automation[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+// ─── INVITATIONS ────────────────────────────────────────────────────────────
+
+model Invitation {
+  id             String           @id @default(cuid())
+  email          String
+  role           Role             @default(VIEWER)
+  organizationId String
+  organization   Organization     @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  invitedById    String
+  invitedBy      User             @relation("InvitedBy", fields: [invitedById], references: [id])
+  token          String           @unique @default(cuid())
+  status         InvitationStatus @default(PENDING)
+  expiresAt      DateTime
+  createdAt      DateTime         @default(now())
+
+  @@index([email, organizationId])
+  @@index([token])
+}
+
+// ─── PRODUCTS & INVENTORY ───────────────────────────────────────────────────
+
+model Product {
+  id             String  @id @default(cuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  externalId   String? // Shopify product ID
+  name         String
+  sku          String?
+  barcode      String?
+  price        Decimal @db.Decimal(10, 2)
+  cost         Decimal? @db.Decimal(10, 2)
+  imageUrl     String?
+  isActive     Boolean @default(true)
+
+  stock        Int     @default(0)
+  reservedStock Int    @default(0)
+  lowStockThreshold Int @default(5)
+
+  orderItems   OrderItem[]
+  inventoryRecords InventoryRecord[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([organizationId, externalId])
+  @@index([organizationId])
+  @@index([sku])
+}
+
+model InventoryRecord {
+  id        String  @id @default(cuid())
+  productId String
+  product   Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  type      String  // IN | OUT | ADJUSTMENT | RETURN
+  quantity  Int
+  reason    String?
+  reference String? // order ID or other reference
+
+  createdAt DateTime @default(now())
+
+  @@index([productId])
+}
+
+// ─── CUSTOMERS ──────────────────────────────────────────────────────────────
+
+model Customer {
+  id             String       @id @default(cuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  externalId   String? // Shopify customer ID
+  name         String
+  phone        String
+  phone2       String?
+  email        String?
+  city         String?
+  address      String?
+  isDuplicate  Boolean @default(false)
+
+  orders Order[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([organizationId, phone])
+  @@index([organizationId])
+}
+
+// ─── ORDERS ─────────────────────────────────────────────────────────────────
+
+model Order {
+  id             String       @id @default(cuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  externalId    String? // Shopify order ID
+  orderNumber   String  // Human readable: #1001
+  source        String  @default("manual") // shopify | manual | etc.
+
+  customerId    String?
+  customer      Customer? @relation(fields: [customerId], references: [id])
+  customerName  String    // Denormalized for speed
+  customerPhone String
+
+  status        OrderStatus @default(PENDING)
+  totalAmount   Decimal     @db.Decimal(10, 2)
+  shippingCost  Decimal     @default(0) @db.Decimal(10, 2)
+
+  shippingAddress Json // { line1, line2, city, state, zip, country }
+  notes           String?
+  tags            String[]
+
+  isDuplicate Boolean @default(false)
+
+  items              OrderItem[]
+  events             OrderEvent[]
+  confirmationTask   ConfirmationTask?
+  fulfillmentTask    FulfillmentTask?
+  parcel             Parcel?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([organizationId, externalId])
+  @@index([organizationId, status])
+  @@index([organizationId, createdAt(sort: Desc)])
+  @@index([customerPhone])
+}
+
+model OrderItem {
+  id      String @id @default(cuid())
+  orderId String
+  order   Order  @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  productId String?
+  product   Product? @relation(fields: [productId], references: [id])
+  name      String   // Denormalized
+  sku       String?
+  quantity  Int
+  unitPrice Decimal  @db.Decimal(10, 2)
+  total     Decimal  @db.Decimal(10, 2)
+}
+
+model OrderEvent {
+  id      String @id @default(cuid())
+  orderId String
+  order   Order  @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  type      String  // status_change | note_added | assigned | etc.
+  data      Json    @default("{}")
+  note      String?
+  userId    String?
+  user      User?   @relation(fields: [userId], references: [id])
+
+  createdAt DateTime @default(now())
+
+  @@index([orderId])
+}
+
+// ─── CONFIRMATION ───────────────────────────────────────────────────────────
+
+model ConfirmationTask {
+  id      String @id @default(cuid())
+  orderId String @unique
+  order   Order  @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  status       ConfirmationStatus @default(PENDING)
+  assignedToId String?
+  assignedTo   User?              @relation("AssignedConfirmer", fields: [assignedToId], references: [id])
+
+  attempts   Int      @default(0)
+  notes      String?
+  scheduledAt DateTime?
+
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@index([status])
+  @@index([assignedToId])
+}
+
+// ─── FULFILLMENT ────────────────────────────────────────────────────────────
+
+model FulfillmentTask {
+  id      String @id @default(cuid())
+  orderId String @unique
+  order   Order  @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  status       FulfillmentStatus @default(TO_PACK)
+  assignedToId String?
+  assignedTo   User?             @relation("AssignedPacker", fields: [assignedToId], references: [id])
+
+  packedAt  DateTime?
+  notes     String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([status])
+}
+
+// ─── DELIVERY ───────────────────────────────────────────────────────────────
+
+model Parcel {
+  id      String @id @default(cuid())
+  orderId String @unique
+  order   Order  @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  trackingNumber String?   @unique
+  provider       String    @default("mescolis")
+  status         DeliveryStatus @default(PENDING_PICKUP)
+  codAmount      Decimal?  @db.Decimal(10, 2)
+  codCollected   Boolean   @default(false)
+
+  lastSyncedAt DateTime?
+  events       ParcelEvent[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model ParcelEvent {
+  id       String @id @default(cuid())
+  parcelId String
+  parcel   Parcel @relation(fields: [parcelId], references: [id], onDelete: Cascade)
+
+  status    DeliveryStatus
+  location  String?
+  note      String?
+  timestamp DateTime @default(now())
+
+  @@index([parcelId])
+}
+
+// ─── CAMPAIGNS ──────────────────────────────────────────────────────────────
+
+model Campaign {
+  id             String       @id @default(cuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  externalId String // Meta campaign ID
+  name       String
+  status     String // ACTIVE | PAUSED | ARCHIVED
+  objective  String?
+
+  metrics CampaignMetric[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([organizationId, externalId])
+  @@index([organizationId])
+}
+
+model CampaignMetric {
+  id         String   @id @default(cuid())
+  campaignId String
+  campaign   Campaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+
+  date         DateTime @db.Date
+  spend        Decimal  @db.Decimal(10, 2)
+  impressions  Int      @default(0)
+  clicks       Int      @default(0)
+  conversions  Int      @default(0)
+  revenue      Decimal  @default(0) @db.Decimal(10, 2)
+
+  // Computed
+  cpc   Decimal? @db.Decimal(10, 4)
+  ctr   Decimal? @db.Decimal(10, 4)
+  roas  Decimal? @db.Decimal(10, 4)
+  cpm   Decimal? @db.Decimal(10, 4)
+
+  @@unique([campaignId, date])
+  @@index([campaignId])
+}
+
+// ─── INTEGRATIONS ───────────────────────────────────────────────────────────
+
+model Integration {
+  id             String       @id @default(cuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  provider    String  // shopify | meta | mescolis
+  isActive    Boolean @default(false)
+  credentials Json    @default("{}") // Encrypted in application layer
+  config      Json    @default("{}")
+  lastSyncAt  DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([organizationId, provider])
+}
+
+// ─── AUTOMATIONS ────────────────────────────────────────────────────────────
+
+model Automation {
+  id             String       @id @default(cuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  name      String
+  isActive  Boolean @default(true)
+  trigger   Json    // { type, conditions }
+  actions   Json    // [{ type, params }]
+
+  lastRunAt   DateTime?
+  runCount    Int @default(0)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([organizationId])
+}

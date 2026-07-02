@@ -1,0 +1,79 @@
+{
+  "common": {
+    "save": "Enregistrer",
+    "cancel": "Annuler",
+    "delete": "Supprimer",
+    "search": "Rechercher...",
+    "loading": "Chargement...",
+    "noResults": "Aucun résultat",
+    "actions": "Actions",
+    "edit": "Modifier",
+    "view": "Voir",
+    "confirm": "Confirmer",
+    "back": "Retour",
+    "next": "Suivant",
+    "submit": "Soumettre",
+    "required": "Obligatoire",
+    "optional": "Optionnel"
+  },
+  "nav": {
+    "dashboard": "Tableau de bord",
+    "orders": "Commandes",
+    "confirmation": "Confirmation",
+    "fulfillment": "Préparation",
+    "delivery": "Livraison",
+    "campaigns": "Campagnes",
+    "inventory": "Inventaire",
+    "finance": "Finance",
+    "team": "Équipe",
+    "settings": "Paramètres",
+    "ai": "Assistant IA"
+  },
+  "auth": {
+    "signIn": "Se connecter",
+    "signUp": "S'inscrire",
+    "signOut": "Se déconnecter",
+    "email": "Adresse e-mail",
+    "password": "Mot de passe",
+    "confirmPassword": "Confirmer le mot de passe",
+    "fullName": "Nom complet",
+    "forgotPassword": "Mot de passe oublié ?",
+    "noAccount": "Pas encore de compte ?",
+    "hasAccount": "Déjà un compte ?",
+    "welcome": "Bon retour",
+    "getStarted": "Commencer"
+  },
+  "orders": {
+    "title": "Commandes",
+    "new": "Nouvelle commande",
+    "status": {
+      "PENDING": "En attente",
+      "CONFIRMED": "Confirmée",
+      "REFUSED": "Refusée",
+      "CANCELLED": "Annulée",
+      "SHIPPED": "Expédiée",
+      "DELIVERED": "Livrée",
+      "RETURNED": "Retournée"
+    }
+  },
+  "confirmation": {
+    "title": "Confirmation",
+    "status": {
+      "PENDING": "En attente",
+      "IN_PROGRESS": "En cours",
+      "CONFIRMED": "Confirmé",
+      "REFUSED": "Refusé",
+      "UNREACHABLE": "Injoignable",
+      "CALL_LATER": "Rappeler"
+    }
+  },
+  "roles": {
+    "OWNER": "Propriétaire",
+    "ADMIN": "Administrateur",
+    "CONFIRMER": "Confirmateur",
+    "PACKER": "Préparateur",
+    "DELIVERER": "Livreur",
+    "CAMPAIGN_MANAGER": "Gestionnaire campagnes",
+    "VIEWER": "Lecteur"
+  }
+}

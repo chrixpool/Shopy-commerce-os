@@ -1,0 +1,48 @@
+# Dependencies
+node_modules/
+.pnpm-store/
+
+# Build outputs
+.next/
+dist/
+build/
+coverage/
+*.tsbuildinfo
+.turbo/
+
+# Environment and local provider state
+.env
+.env.*
+!.env.example
+.vercel/
+.railway/
+.render/
+
+# Local database/data directories
+pgsql/
+postgres.zip
+*.sqlite
+*.sqlite3
+*.db
+data/
+tmp/
+apps/api/src/generated/prisma/
+packages/shared/src/*.js
+packages/shared/src/*.d.ts
+
+# Logs
+*.log
+logfile
+npm-debug.log*
+pnpm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# OS/editor junk
+.DS_Store
+Thumbs.db
+desktop.ini
+.vscode/
+.idea/
+*.swp
+*.swo

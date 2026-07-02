@@ -1,0 +1,52 @@
+{
+  "name": "shopy-commerce-os",
+  "version": "0.0.0",
+  "private": true,
+  "scripts": {
+    "dev": "pnpm --filter @shopy/shared build && pnpm --parallel --filter @shopy/api --filter @shopy/web dev",
+    "build": "pnpm run build:local",
+    "build:local": "pnpm -r --if-present build",
+    "build:cloud": "turbo build",
+    "lint": "pnpm run lint:local",
+    "lint:local": "pnpm -r --if-present lint",
+    "lint:cloud": "turbo lint",
+    "typecheck": "pnpm run typecheck:local",
+    "typecheck:local": "pnpm -r --if-present typecheck",
+    "typecheck:cloud": "turbo typecheck",
+    "smoke:local": "node scripts/smoke-local.mjs",
+    "format": "prettier --write \"**/*.{ts,tsx,js,jsx,json,css,md}\"",
+    "format:check": "prettier --check \"**/*.{ts,tsx,js,jsx,json,css,md}\"",
+    "prepare": "husky"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.0.0",
+    "@typescript-eslint/eslint-plugin": "^8.0.0",
+    "@typescript-eslint/parser": "^8.0.0",
+    "eslint": "^9.0.0",
+    "husky": "^9.1.0",
+    "lint-staged": "^15.2.0",
+    "prettier": "^3.3.0",
+    "prisma": "6.19.3",
+    "turbo": "^2.3.0",
+    "typescript": "^5.5.0",
+    "typescript-eslint": "^8.0.0"
+  },
+  "packageManager": "pnpm@9.15.0",
+  "engines": {
+    "node": ">=20.0.0",
+    "pnpm": ">=9.0.0"
+  },
+  "lint-staged": {
+    "*.{ts,tsx,js,jsx}": [
+      "eslint --fix",
+      "prettier --write"
+    ],
+    "*.{json,css,md}": [
+      "prettier --write"
+    ]
+  },
+  "dependencies": {
+    "@prisma/client": "6.19.3",
+    "bcryptjs": "2.4.3"
+  }
+}

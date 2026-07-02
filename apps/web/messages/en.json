@@ -1,0 +1,79 @@
+{
+  "common": {
+    "save": "Save",
+    "cancel": "Cancel",
+    "delete": "Delete",
+    "search": "Search...",
+    "loading": "Loading...",
+    "noResults": "No results found",
+    "actions": "Actions",
+    "edit": "Edit",
+    "view": "View",
+    "confirm": "Confirm",
+    "back": "Back",
+    "next": "Next",
+    "submit": "Submit",
+    "required": "Required",
+    "optional": "Optional"
+  },
+  "nav": {
+    "dashboard": "Dashboard",
+    "orders": "Orders",
+    "confirmation": "Confirmation",
+    "fulfillment": "Fulfillment",
+    "delivery": "Delivery",
+    "campaigns": "Campaigns",
+    "inventory": "Inventory",
+    "finance": "Finance",
+    "team": "Team",
+    "settings": "Settings",
+    "ai": "AI Assistant"
+  },
+  "auth": {
+    "signIn": "Sign In",
+    "signUp": "Sign Up",
+    "signOut": "Sign Out",
+    "email": "Email address",
+    "password": "Password",
+    "confirmPassword": "Confirm password",
+    "fullName": "Full name",
+    "forgotPassword": "Forgot password?",
+    "noAccount": "Don't have an account?",
+    "hasAccount": "Already have an account?",
+    "welcome": "Welcome back",
+    "getStarted": "Get started"
+  },
+  "orders": {
+    "title": "Orders",
+    "new": "New Order",
+    "status": {
+      "PENDING": "Pending",
+      "CONFIRMED": "Confirmed",
+      "REFUSED": "Refused",
+      "CANCELLED": "Cancelled",
+      "SHIPPED": "Shipped",
+      "DELIVERED": "Delivered",
+      "RETURNED": "Returned"
+    }
+  },
+  "confirmation": {
+    "title": "Confirmation",
+    "status": {
+      "PENDING": "Pending",
+      "IN_PROGRESS": "In Progress",
+      "CONFIRMED": "Confirmed",
+      "REFUSED": "Refused",
+      "UNREACHABLE": "Unreachable",
+      "CALL_LATER": "Call Later"
+    }
+  },
+  "roles": {
+    "OWNER": "Owner",
+    "ADMIN": "Admin",
+    "CONFIRMER": "Confirmer",
+    "PACKER": "Packer",
+    "DELIVERER": "Deliverer",
+    "CAMPAIGN_MANAGER": "Campaign Manager",
+    "VIEWER": "Viewer"
+  }
+}

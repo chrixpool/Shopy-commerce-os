@@ -1,0 +1,58 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  ci:
+    name: Build and typecheck
+    runs-on: ubuntu-latest
+
+    env:
+      DATABASE_URL: postgresql://user:pass@localhost:5432/shopy_ci
+      PRISMA_CLIENT_ENGINE_TYPE: binary
+      PRISMA_CLI_QUERY_ENGINE_TYPE: binary
+      AUTH_SECRET: ci-test-secret-not-used-in-production
+      AUTH_URL: http://localhost:3000
+      API_URL: http://localhost:4000
+      NEXT_PUBLIC_API_URL: http://localhost:4000
+      API_INTERNAL_SECRET: ci-internal-secret
+      AI_PROVIDER: local
+      EMAIL_PROVIDER: disabled
+      SMS_PROVIDER: disabled
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build shared package
+        run: pnpm --filter @shopy/shared build
+
+      - name: Generate Prisma client
+        run: pnpm --filter @shopy/api db:generate
+
+      - name: Typecheck
+        run: pnpm typecheck:local
+
+      - name: Build
+        run: pnpm build:local
+
+      - name: Lint
+        run: pnpm lint:local
