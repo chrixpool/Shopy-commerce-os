@@ -46,3 +46,7 @@ desktop.ini
 .idea/
 *.swp
 *.swo
+
+.vercel/
+.neon
+.neon/

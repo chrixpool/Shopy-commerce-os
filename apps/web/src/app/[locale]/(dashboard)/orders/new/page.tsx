@@ -1,7 +1,8 @@
 import { redirect } from 'next/navigation';
 import { revalidatePath } from 'next/cache';
 import { PageHeader } from '@/components/ui/page';
-import { apiFetch } from '@/lib/api';
+import { apiFetch, getWorkspaceSettings } from '@/lib/api';
+import { formatMoney } from '@/lib/currency';
 
 async function createOrder(formData: FormData) {
   'use server';
@@ -32,13 +33,14 @@ async function createOrder(formData: FormData) {
 
 export default async function NewOrderPage({ params }: { params: Promise<{ locale: string }> }) {
   const { locale } = await params;
+  const workspace = await getWorkspaceSettings();
 
   return (
     <div className="page-stack">
       <PageHeader
         eyebrow="Manual order"
         title="New order"
-        description="Create a database-backed order with a customer and one line item."
+        description={`Create a database-backed order with one line item. Prices are entered in ${workspace.baseCurrency}.`}
       />
 
       <form action={createOrder} className="card card-padded form-grid">
@@ -75,8 +77,11 @@ export default async function NewOrderPage({ params }: { params: Promise<{ local
           />
         </label>
         <label className="form-field">
-          <span>Price</span>
+          <span>Price ({workspace.baseCurrency})</span>
           <input className="field" name="unitPrice" type="number" min="0" step="0.01" required />
+          <small className="field-help">
+            Example: {formatMoney(1234.56, workspace.baseCurrency, locale)}
+          </small>
         </label>
         <div className="form-actions">
           <button className="button button-primary" type="submit">

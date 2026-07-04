@@ -1,4 +1,5 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import { normalizeCurrencyCode, PlatformCurrencySchema } from '@shopy/shared';
 import { DeliveryStatus, OrderStatus } from '@prisma/client';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import type { CreateOrderDto } from './dto/create-order.dto';
@@ -163,6 +164,11 @@ export class OrdersService {
     const rows = parseCsv(csv);
     const [header, ...records] = rows;
     if (!header || records.length === 0) return { created: 0, orders: [] };
+    const organization = await this.prisma.organization.findUnique({
+      where: { id: organizationId },
+      select: { baseCurrency: true },
+    });
+    const workspaceCurrency = normalizeCurrencyCode(organization?.baseCurrency);
 
     const indexes = header.reduce<Record<string, number>>((acc, column, index) => {
       acc[column.trim().toLowerCase()] = index;
@@ -178,6 +184,17 @@ export class OrdersService {
       const productName = get('product') || get('productname') || get('sku') || 'Imported product';
       const quantity = Number(get('quantity') || 1);
       const unitPrice = Number(get('price') || get('unitprice') || 0);
+      const rowCurrency = get('currency');
+
+      if (rowCurrency && !PlatformCurrencySchema.safeParse(rowCurrency.toUpperCase()).success) {
+        throw new BadRequestException(`CSV currency ${rowCurrency.toUpperCase()} is not supported`);
+      }
+
+      if (rowCurrency && rowCurrency.toUpperCase() !== workspaceCurrency) {
+        throw new BadRequestException(
+          `CSV currency ${rowCurrency.toUpperCase()} does not match workspace currency ${workspaceCurrency}`,
+        );
+      }
 
       if (!get('customer') && !get('customername')) continue;
       if (!get('phone') && !get('customerphone')) continue;

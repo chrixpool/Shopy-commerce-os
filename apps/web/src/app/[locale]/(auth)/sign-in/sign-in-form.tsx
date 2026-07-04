@@ -38,13 +38,18 @@ export function SignInForm({ locale }: { locale: string }) {
       <div>
         <p className="eyebrow">Welcome back</p>
         <h1 className="auth-title">Sign in to Shopy</h1>
-        <p className="auth-copy">Use the seeded demo account or your workspace account.</p>
+        <p className="auth-copy">Use your workspace account or the sample credentials below.</p>
       </div>
 
       <label className="form-field">
         <span>Email</span>
         <input className="field" name="email" type="email" defaultValue="demo@Shopy.app" required />
       </label>
+
+      <div className="auth-helper">
+        <span>Sample workspace</span>
+        <code>demo@Shopy.app / Demo12345!</code>
+      </div>
 
       <label className="form-field">
         <span>Password</span>

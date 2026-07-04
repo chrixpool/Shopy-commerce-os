@@ -136,6 +136,7 @@ model Organization {
   id   String @id @default(cuid())
   name String
   slug String @unique
+  baseCurrency String @default("USD")
 
   users       User[]
   invitations Invitation[]
@@ -166,6 +167,7 @@ model Invitation {
   createdAt      DateTime         @default(now())
 
   @@index([email, organizationId])
+  @@index([organizationId, status])
   @@index([token])
 }
 
@@ -371,6 +373,8 @@ model Parcel {
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+
+  @@index([status])
 }
 
 model ParcelEvent {

@@ -1,6 +1,7 @@
 import { revalidatePath } from 'next/cache';
 import { EmptyState, MetricCard, PageHeader } from '@/components/ui/page';
-import { apiFetch } from '@/lib/api';
+import { apiFetch, getWorkspaceSettings } from '@/lib/api';
+import { formatMoney } from '@/lib/currency';
 
 interface ParcelRecord {
   id: string;
@@ -13,6 +14,7 @@ interface ParcelRecord {
     customerName: string;
     customerPhone: string;
     status: string;
+    totalAmount: string | number;
     customer?: {
       city?: string | null;
       address?: string | null;
@@ -42,8 +44,12 @@ async function updateDelivery(formData: FormData) {
   revalidatePath('/[locale]/orders', 'page');
 }
 
-export default async function DeliveryPage() {
-  const parcels = await apiFetch<ParcelRecord[]>('/api/v1/delivery');
+export default async function DeliveryPage({ params }: { params: Promise<{ locale: string }> }) {
+  const { locale } = await params;
+  const [parcels, workspace] = await Promise.all([
+    apiFetch<ParcelRecord[]>('/api/v1/delivery'),
+    getWorkspaceSettings(),
+  ]);
   const inTransit = parcels.filter((parcel) =>
     ['PICKED_UP', 'IN_TRANSIT', 'OUT_FOR_DELIVERY'].includes(parcel.status),
   ).length;
@@ -103,6 +109,7 @@ export default async function DeliveryPage() {
                 <th>Parcel</th>
                 <th>Customer</th>
                 <th>City</th>
+                <th>Value</th>
                 <th>Status</th>
                 <th>Latest event</th>
                 <th>Action</th>
@@ -122,6 +129,7 @@ export default async function DeliveryPage() {
                     <div>{parcel.order.customerPhone}</div>
                   </td>
                   <td>{parcel.order.customer?.city ?? '-'}</td>
+                  <td>{formatMoney(parcel.order.totalAmount, workspace.baseCurrency, locale)}</td>
                   <td>
                     <span className="badge badge-muted">{parcel.status}</span>
                   </td>

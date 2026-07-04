@@ -143,10 +143,11 @@ async function main() {
 
   const org = await prisma.organization.upsert({
     where: { slug: 'shopy-demo' },
-    update: { name: 'Shopy Demo' },
+    update: { name: 'Shopy Demo', baseCurrency: 'USD' },
     create: {
       name: 'Shopy Demo',
       slug: 'shopy-demo',
+      baseCurrency: 'USD',
     },
   });
 

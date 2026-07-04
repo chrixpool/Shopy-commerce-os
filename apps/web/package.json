@@ -12,6 +12,8 @@
   "dependencies": {
     "@auth/prisma-adapter": "^2.7.0",
     "@shopy/shared": "workspace:*",
+    "@vercel/analytics": "^2.0.1",
+    "@vercel/speed-insights": "^2.0.0",
     "next": "15.5.20",
     "next-auth": "^5.0.0-beta.25",
     "next-intl": "^3.26.0",

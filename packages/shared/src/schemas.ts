@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { PlatformCurrencySchema } from './currency';
 
 // ─── AUTH SCHEMAS ───────────────────────────────────────────────────────────
 
@@ -61,6 +62,16 @@ export const PaginationSchema = z.object({
   cursor: z.string().optional(),
 });
 
+export const OrganizationSettingsSchema = z.object({
+  name: z.string().min(2).optional(),
+  slug: z
+    .string()
+    .min(2)
+    .regex(/^[a-z0-9-]+$/)
+    .optional(),
+  baseCurrency: PlatformCurrencySchema.optional(),
+});
+
 // ─── TYPES ──────────────────────────────────────────────────────────────────
 
 export type SignInInput = z.infer<typeof SignInSchema>;
@@ -68,3 +79,4 @@ export type SignUpInput = z.infer<typeof SignUpSchema>;
 export type InviteInput = z.infer<typeof InviteSchema>;
 export type CreateOrderInput = z.infer<typeof CreateOrderSchema>;
 export type PaginationInput = z.infer<typeof PaginationSchema>;
+export type OrganizationSettingsInput = z.infer<typeof OrganizationSettingsSchema>;

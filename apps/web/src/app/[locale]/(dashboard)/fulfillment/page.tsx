@@ -1,6 +1,7 @@
 import { revalidatePath } from 'next/cache';
 import { EmptyState, MetricCard, PageHeader } from '@/components/ui/page';
-import { apiFetch } from '@/lib/api';
+import { apiFetch, getWorkspaceSettings } from '@/lib/api';
+import { formatMoney } from '@/lib/currency';
 
 interface FulfillmentTask {
   id: string;
@@ -11,6 +12,7 @@ interface FulfillmentTask {
     customerName: string;
     customerPhone: string;
     status: string;
+    totalAmount: string | number;
     items: Array<{
       id: string;
       name: string;
@@ -41,8 +43,12 @@ async function updateFulfillment(formData: FormData) {
   revalidatePath('/[locale]/orders', 'page');
 }
 
-export default async function FulfillmentPage() {
-  const tasks = await apiFetch<FulfillmentTask[]>('/api/v1/fulfillment');
+export default async function FulfillmentPage({ params }: { params: Promise<{ locale: string }> }) {
+  const { locale } = await params;
+  const [tasks, workspace] = await Promise.all([
+    apiFetch<FulfillmentTask[]>('/api/v1/fulfillment'),
+    getWorkspaceSettings(),
+  ]);
   const toPack = tasks.filter((task) => task.status === 'TO_PACK').length;
   const packing = tasks.filter((task) => task.status === 'PACKING').length;
   const packed = tasks.filter((task) => task.status === 'PACKED').length;
@@ -100,6 +106,7 @@ export default async function FulfillmentPage() {
                 <th>Order</th>
                 <th>Customer</th>
                 <th>Items</th>
+                <th>Value</th>
                 <th>Stock</th>
                 <th>Status</th>
                 <th>Action</th>
@@ -116,6 +123,7 @@ export default async function FulfillmentPage() {
                   <td>
                     {task.order.items.map((item) => `${item.quantity}x ${item.name}`).join(', ')}
                   </td>
+                  <td>{formatMoney(task.order.totalAmount, workspace.baseCurrency, locale)}</td>
                   <td>
                     {task.order.items.map((item) => (
                       <div key={item.id}>

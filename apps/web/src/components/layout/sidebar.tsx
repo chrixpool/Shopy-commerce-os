@@ -53,6 +53,7 @@ function NavGroup({
             <li key={item.key}>
               <Link
                 href={href}
+                prefetch
                 className={`nav-link${isActive ? ' nav-link-active' : ''}`}
                 aria-current={isActive ? 'page' : undefined}
               >
@@ -75,10 +76,10 @@ export function Sidebar({ locale }: { locale: string }) {
   return (
     <aside className="sidebar">
       <Link className="sidebar-brand" href={`/${locale}/dashboard`}>
-        <span className="brand-mark">O</span>
+        <span className="brand-mark">S</span>
         <span className="brand-copy">
           <span className="brand-name">Shopy</span>
-          <span className="brand-subtitle">Commerce CRM</span>
+          <span className="brand-subtitle">Operations cockpit</span>
         </span>
       </Link>
 
@@ -89,9 +90,9 @@ export function Sidebar({ locale }: { locale: string }) {
       </nav>
 
       <div className="sidebar-footer">
-        <span className="badge badge-info">Demo workspace</span>
+        <span className="badge badge-info">Operations workspace</span>
         <p className="section-description">
-          Authentication is temporarily bypassed while the product UI is reviewed.
+          Manual workflows, CSV intake, local rules, and database-backed queues are enabled.
         </p>
       </div>
     </aside>

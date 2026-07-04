@@ -1,11 +1,13 @@
 import { revalidatePath } from 'next/cache';
 import { MetricCard, PageHeader } from '@/components/ui/page';
 import { apiFetch } from '@/lib/api';
+import { formatMoney, SUPPORTED_CURRENCIES } from '@/lib/currency';
 
 interface Organization {
   id: string;
   name: string;
   slug: string;
+  baseCurrency: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -26,6 +28,7 @@ async function updateOrganization(formData: FormData) {
     body: JSON.stringify({
       name: String(formData.get('name') ?? ''),
       slug: String(formData.get('slug') ?? ''),
+      baseCurrency: String(formData.get('baseCurrency') ?? 'USD'),
     }),
   });
 
@@ -33,7 +36,8 @@ async function updateOrganization(formData: FormData) {
   revalidatePath('/[locale]/dashboard', 'layout');
 }
 
-export default async function SettingsPage() {
+export default async function SettingsPage({ params }: { params: Promise<{ locale: string }> }) {
+  const { locale } = await params;
   const [organization, integrations] = await Promise.all([
     apiFetch<Organization>('/api/v1/settings/organization'),
     apiFetch<Integration[]>('/api/v1/settings/integrations'),
@@ -46,7 +50,7 @@ export default async function SettingsPage() {
       <PageHeader
         eyebrow="Workspace"
         title="Settings"
-        description="Manage workspace identity and review local MVP integration status."
+        description="Manage workspace identity, operating currency, and connected workflow capabilities."
       />
 
       <section className="stats-grid" aria-label="Settings summary">
@@ -55,6 +59,13 @@ export default async function SettingsPage() {
           value={organization.name}
           help={`Slug: ${organization.slug}`}
           badge="DB"
+          badgeTone="info"
+        />
+        <MetricCard
+          label="Currency"
+          value={organization.baseCurrency}
+          help={formatMoney(1234.56, organization.baseCurrency, locale)}
+          badge="Workspace"
           badgeTone="info"
         />
         <MetricCard
@@ -75,7 +86,7 @@ export default async function SettingsPage() {
           label="Integrations"
           value={String(connectedCount)}
           help="Connected system and integration cards."
-          badge={shopify?.isActive ? 'Shopify on' : 'MVP'}
+          badge={shopify?.isActive ? 'Shopify on' : 'Manual-first'}
           badgeTone={shopify?.isActive ? 'success' : 'muted'}
         />
       </section>
@@ -107,6 +118,24 @@ export default async function SettingsPage() {
               pattern="[a-z0-9-]+"
             />
           </label>
+          <label className="form-field">
+            <span>Platform currency</span>
+            <select
+              className="select-field"
+              name="baseCurrency"
+              defaultValue={organization.baseCurrency}
+            >
+              {SUPPORTED_CURRENCIES.map((currency) => (
+                <option key={currency} value={currency}>
+                  {currency} - {formatMoney(1234.56, currency, locale)}
+                </option>
+              ))}
+            </select>
+            <small className="field-help">
+              Changing currency updates how monetary values are displayed and entered. It does not
+              convert existing amounts.
+            </small>
+          </label>
           <div className="form-actions">
             <button className="button button-primary" type="submit">
               Save organization
@@ -116,7 +145,9 @@ export default async function SettingsPage() {
 
         <aside className="card card-padded">
           <h2 className="section-title">Integration status</h2>
-          <p className="section-description">Placeholder-safe cards for local MVP readiness.</p>
+          <p className="section-description">
+            Current capabilities are configured for free-first operations.
+          </p>
           <div className="step-list" style={{ marginTop: 18 }}>
             {integrations.map((integration) => (
               <div className="step-item" key={`${integration.provider}-${integration.source}`}>

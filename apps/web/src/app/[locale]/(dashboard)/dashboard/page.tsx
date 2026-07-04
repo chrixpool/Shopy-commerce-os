@@ -1,6 +1,15 @@
 import { getTranslations } from 'next-intl/server';
-import { MetricCard, PageHeader, SetupSteps } from '@/components/ui/page';
-import { apiFetch } from '@/lib/api';
+import Link from 'next/link';
+import {
+  EmptyState,
+  MetricCard,
+  PageHeader,
+  SectionHeader,
+  StatusBadge,
+  SurfaceCard,
+} from '@/components/ui/page';
+import { apiFetch, getWorkspaceSettings } from '@/lib/api';
+import { formatMoney } from '@/lib/currency';
 
 interface DashboardSummary {
   totalOrders: number;
@@ -15,17 +24,13 @@ interface DashboardSummary {
   suggestions: Array<{ title: string; copy: string }>;
 }
 
-function formatMoney(value: number) {
-  return new Intl.NumberFormat('en', {
-    style: 'currency',
-    currency: 'MAD',
-    maximumFractionDigits: 0,
-  }).format(value);
-}
-
-export default async function DashboardPage() {
+export default async function DashboardPage({ params }: { params: Promise<{ locale: string }> }) {
+  const { locale } = await params;
   const t = await getTranslations();
-  const summary = await apiFetch<DashboardSummary>('/api/v1/dashboard/summary');
+  const [summary, workspace] = await Promise.all([
+    apiFetch<DashboardSummary>('/api/v1/dashboard/summary'),
+    getWorkspaceSettings(),
+  ]);
   const rows = [
     {
       work: 'Confirm customers',
@@ -61,9 +66,9 @@ export default async function DashboardPage() {
         description="A quick view of orders, confirmations, fulfillment, and revenue. Start here to understand what needs attention today."
         actions={
           <>
-            <a className="button button-primary" href="./orders">
+            <Link className="button button-primary" href={`/${locale}/orders`} prefetch>
               Add or import orders
-            </a>
+            </Link>
           </>
         }
       />
@@ -106,23 +111,20 @@ export default async function DashboardPage() {
         />
         <MetricCard
           label="Revenue tracked"
-          value={formatMoney(summary.revenue)}
+          value={formatMoney(summary.revenue, workspace.baseCurrency, locale)}
           help="Revenue from confirmed, shipped, and delivered orders."
           badge="DB"
           badgeTone="muted"
         />
       </section>
 
-      <section className="panel-grid">
-        <div className="card card-padded">
-          <div className="page-header">
-            <div>
-              <h2 className="section-title">Today&apos;s work queue</h2>
-              <p className="section-description">
-                Live queues based on orders and task records in the database.
-              </p>
-            </div>
-          </div>
+      <section className="command-grid">
+        <SurfaceCard className="command-panel">
+          <SectionHeader
+            title="Operations command center"
+            description="Live queues from database-backed workflow records."
+            actions={<StatusBadge tone="info">Realtime DB</StatusBadge>}
+          />
 
           <div className="table-wrap" style={{ marginTop: 16 }}>
             <table className="data-table">
@@ -139,33 +141,87 @@ export default async function DashboardPage() {
                     <td className="strong-cell">{row.work}</td>
                     <td>{row.owner}</td>
                     <td>
-                      <span className={`badge badge-${row.tone}`}>{row.status}</span>
+                      <StatusBadge tone={row.tone}>{row.status}</StatusBadge>
                     </td>
                   </tr>
                 ))}
               </tbody>
             </table>
           </div>
-        </div>
+        </SurfaceCard>
 
-        <aside className="card card-padded">
-          <h2 className="section-title">Smart suggestions</h2>
-          <p className="section-description">Local rule-based guidance. No paid AI API is used.</p>
-          <div style={{ marginTop: 18 }}>
-            <SetupSteps
-              steps={
-                summary.suggestions.length > 0
-                  ? summary.suggestions
-                  : [
-                      {
-                        title: 'Queues are clear',
-                        copy: 'No urgent local-rule suggestions right now.',
-                      },
-                    ]
-              }
-            />
+        <SurfaceCard>
+          <SectionHeader title="Quick actions" description="Move common work forward quickly." />
+          <div className="quick-action-grid">
+            <Link className="quick-action" href={`/${locale}/orders/new`} prefetch>
+              <span>New order</span>
+              <small>Create a manual order</small>
+            </Link>
+            <Link className="quick-action" href={`/${locale}/orders`} prefetch>
+              <span>Import CSV</span>
+              <small>Add orders in bulk</small>
+            </Link>
+            <Link className="quick-action" href={`/${locale}/confirmation`} prefetch>
+              <span>Review calls</span>
+              <small>Confirm pending orders</small>
+            </Link>
+            <Link className="quick-action" href={`/${locale}/inventory`} prefetch>
+              <span>Stock control</span>
+              <small>Check low inventory</small>
+            </Link>
           </div>
-        </aside>
+        </SurfaceCard>
+      </section>
+
+      <section className="panel-grid">
+        <SurfaceCard>
+          <SectionHeader
+            title="Smart suggestions"
+            description="Local rule-based guidance. No paid AI API is used."
+          />
+          {summary.suggestions.length > 0 ? (
+            <div className="priority-list">
+              {summary.suggestions.map((suggestion) => (
+                <div className="priority-item" key={suggestion.title}>
+                  <span className="priority-dot" aria-hidden="true" />
+                  <div>
+                    <p className="step-title">{suggestion.title}</p>
+                    <p className="step-copy">{suggestion.copy}</p>
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <EmptyState
+              icon="OK"
+              title="No urgent priorities"
+              description="Queues are healthy. New suggestions appear when local operating rules detect work that needs attention."
+            />
+          )}
+        </SurfaceCard>
+
+        <SurfaceCard>
+          <SectionHeader
+            title="Performance snapshot"
+            description="Operational signal from current records, without fabricated charts."
+          />
+          <div className="snapshot-grid">
+            <div>
+              <span className="metric-label">Revenue context</span>
+              <strong>{formatMoney(summary.revenue, workspace.baseCurrency, locale)}</strong>
+            </div>
+            <div>
+              <span className="metric-label">Tracked statuses</span>
+              <strong>{Object.keys(summary.ordersByStatus).length}</strong>
+            </div>
+            <div>
+              <span className="metric-label">Active queues</span>
+              <strong>
+                {Object.values(summary.workQueues).filter((value) => Number(value) > 0).length}
+              </strong>
+            </div>
+          </div>
+        </SurfaceCard>
       </section>
     </div>
   );

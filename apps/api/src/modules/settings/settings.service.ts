@@ -1,4 +1,5 @@
 import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
+import { normalizeCurrencyCode } from '@shopy/shared';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import type { UpdateOrganizationDto } from './dto/update-organization.dto';
 
@@ -13,6 +14,7 @@ export class SettingsService {
         id: true,
         name: true,
         slug: true,
+        baseCurrency: true,
         createdAt: true,
         updatedAt: true,
       },
@@ -37,11 +39,13 @@ export class SettingsService {
       data: {
         ...(dto.name ? { name: dto.name } : {}),
         ...(dto.slug ? { slug: dto.slug } : {}),
+        ...(dto.baseCurrency ? { baseCurrency: normalizeCurrencyCode(dto.baseCurrency) } : {}),
       },
       select: {
         id: true,
         name: true,
         slug: true,
+        baseCurrency: true,
         createdAt: true,
         updatedAt: true,
       },

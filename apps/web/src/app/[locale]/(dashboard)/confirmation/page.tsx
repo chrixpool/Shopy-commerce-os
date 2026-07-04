@@ -1,6 +1,7 @@
 import { revalidatePath } from 'next/cache';
 import { EmptyState, MetricCard, PageHeader } from '@/components/ui/page';
-import { apiFetch } from '@/lib/api';
+import { apiFetch, getWorkspaceSettings } from '@/lib/api';
+import { formatMoney } from '@/lib/currency';
 
 interface ConfirmationTask {
   id: string;
@@ -11,6 +12,7 @@ interface ConfirmationTask {
     customerName: string;
     customerPhone: string;
     status: string;
+    totalAmount: string | number;
     customer?: {
       city?: string | null;
       address?: string | null;
@@ -38,8 +40,16 @@ function digits(phone: string) {
   return phone.replace(/\D/g, '');
 }
 
-export default async function ConfirmationPage() {
-  const tasks = await apiFetch<ConfirmationTask[]>('/api/v1/confirmation');
+export default async function ConfirmationPage({
+  params,
+}: {
+  params: Promise<{ locale: string }>;
+}) {
+  const { locale } = await params;
+  const [tasks, workspace] = await Promise.all([
+    apiFetch<ConfirmationTask[]>('/api/v1/confirmation'),
+    getWorkspaceSettings(),
+  ]);
   const pending = tasks.filter((task) =>
     ['PENDING', 'IN_PROGRESS', 'CALL_LATER'].includes(task.status),
   ).length;
@@ -99,6 +109,7 @@ export default async function ConfirmationPage() {
                 <th>Order</th>
                 <th>Customer</th>
                 <th>City</th>
+                <th>Value</th>
                 <th>Task</th>
                 <th>Order status</th>
                 <th>Action</th>
@@ -129,6 +140,7 @@ export default async function ConfirmationPage() {
                     </div>
                   </td>
                   <td>{task.order.customer?.city ?? '-'}</td>
+                  <td>{formatMoney(task.order.totalAmount, workspace.baseCurrency, locale)}</td>
                   <td>
                     <span className="badge badge-muted">{task.status}</span>
                     <div>

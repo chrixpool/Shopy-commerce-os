@@ -10,7 +10,8 @@ export default function DashboardError({
   const isApiFailure =
     error.message.includes('API request failed') ||
     error.message.includes('fetch failed') ||
-    error.message.includes('ECONNREFUSED');
+    error.message.includes('ECONNREFUSED') ||
+    error.message.includes('Shopy API');
 
   return (
     <div className="page-stack">
@@ -20,12 +21,12 @@ export default function DashboardError({
             ER
           </span>
           <h1 className="empty-title">
-            {isApiFailure ? 'API unavailable' : 'Something went wrong'}
+            {isApiFailure ? 'Connecting to Shopy API' : 'We could not load this view'}
           </h1>
           <p className="empty-description">
             {isApiFailure
-              ? 'The local API is not responding. Start Postgres and run pnpm dev, then try again.'
-              : 'The page could not load. Try again or return to the dashboard.'}
+              ? 'The workspace service may be starting on the free hosting tier. Please retry in a moment.'
+              : 'Please retry. If the issue continues, return to the dashboard and reopen this view.'}
           </p>
           <div className="actions-row" style={{ justifyContent: 'center', marginTop: 18 }}>
             <button className="button button-primary" type="button" onClick={reset}>

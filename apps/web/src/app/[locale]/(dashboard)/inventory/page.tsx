@@ -1,6 +1,7 @@
 import { revalidatePath } from 'next/cache';
 import { EmptyState, MetricCard, PageHeader } from '@/components/ui/page';
-import { apiFetch } from '@/lib/api';
+import { apiFetch, getWorkspaceSettings } from '@/lib/api';
+import { formatMoney } from '@/lib/currency';
 
 interface ProductRecord {
   id: string;
@@ -17,14 +18,6 @@ interface ProductRecord {
     reason?: string | null;
     createdAt: string;
   }>;
-}
-
-function money(value: string | number) {
-  return new Intl.NumberFormat('en', {
-    style: 'currency',
-    currency: 'MAD',
-    maximumFractionDigits: 0,
-  }).format(Number(value));
 }
 
 async function createProduct(formData: FormData) {
@@ -64,10 +57,18 @@ async function adjustStock(formData: FormData) {
   revalidatePath('/[locale]/dashboard', 'page');
 }
 
-export default async function InventoryPage() {
-  const products = await apiFetch<ProductRecord[]>('/api/v1/inventory/products');
+export default async function InventoryPage({ params }: { params: Promise<{ locale: string }> }) {
+  const { locale } = await params;
+  const [products, workspace] = await Promise.all([
+    apiFetch<ProductRecord[]>('/api/v1/inventory/products'),
+    getWorkspaceSettings(),
+  ]);
   const lowStock = products.filter((product) => product.stock <= product.lowStockThreshold).length;
   const totalStock = products.reduce((sum, product) => sum + product.stock, 0);
+  const inventoryValue = products.reduce(
+    (sum, product) => sum + Number(product.price) * product.stock,
+    0,
+  );
 
   return (
     <div className="page-stack">
@@ -100,6 +101,13 @@ export default async function InventoryPage() {
           badgeTone={lowStock ? 'warning' : 'success'}
         />
         <MetricCard
+          label="Inventory value"
+          value={formatMoney(inventoryValue, workspace.baseCurrency, locale)}
+          help="Current stock multiplied by product prices."
+          badge={workspace.baseCurrency}
+          badgeTone="info"
+        />
+        <MetricCard
           label="Stock records"
           value={String(
             products.reduce((sum, product) => sum + product.inventoryRecords.length, 0),
@@ -120,11 +128,11 @@ export default async function InventoryPage() {
           <input className="field" name="sku" />
         </label>
         <label className="form-field">
-          <span>Price</span>
+          <span>Price ({workspace.baseCurrency})</span>
           <input className="field" name="price" type="number" min="0" step="0.01" required />
         </label>
         <label className="form-field">
-          <span>Cost</span>
+          <span>Cost ({workspace.baseCurrency})</span>
           <input className="field" name="cost" type="number" min="0" step="0.01" />
         </label>
         <label className="form-field">
@@ -173,7 +181,7 @@ export default async function InventoryPage() {
                     <div className="strong-cell">{product.name}</div>
                     <div>{product.sku ?? 'No SKU'}</div>
                   </td>
-                  <td>{money(product.price)}</td>
+                  <td>{formatMoney(product.price, workspace.baseCurrency, locale)}</td>
                   <td>
                     <span
                       className={`badge ${product.stock <= product.lowStockThreshold ? 'badge-warning' : 'badge-success'}`}

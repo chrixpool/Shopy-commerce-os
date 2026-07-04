@@ -2,7 +2,8 @@ import Link from 'next/link';
 import { revalidatePath } from 'next/cache';
 import { getTranslations } from 'next-intl/server';
 import { EmptyState, MetricCard, PageHeader } from '@/components/ui/page';
-import { apiFetch } from '@/lib/api';
+import { apiFetch, getWorkspaceSettings } from '@/lib/api';
+import { formatMoney } from '@/lib/currency';
 
 interface OrderItem {
   id: string;
@@ -41,14 +42,6 @@ const STATUSES = [
   'CANCELLED',
   'REFUSED',
 ];
-
-function money(value: string | number) {
-  return new Intl.NumberFormat('en', {
-    style: 'currency',
-    currency: 'MAD',
-    maximumFractionDigits: 0,
-  }).format(Number(value));
-}
 
 async function updateStatus(formData: FormData) {
   'use server';
@@ -96,7 +89,10 @@ export default async function OrdersPage({
   if (filters.search) query.set('search', filters.search);
   if (filters.status && filters.status !== 'all') query.set('status', filters.status);
 
-  const orders = await apiFetch<OrdersResponse>(`/api/v1/orders?${query.toString()}`);
+  const [orders, workspace] = await Promise.all([
+    apiFetch<OrdersResponse>(`/api/v1/orders?${query.toString()}`),
+    getWorkspaceSettings(),
+  ]);
   const counts = orders.data.reduce<Record<string, number>>((acc, order) => {
     acc[order.status] = (acc[order.status] ?? 0) + 1;
     return acc;
@@ -182,7 +178,7 @@ export default async function OrdersPage({
           <textarea
             className="field textarea-field"
             name="csv"
-            placeholder="customer,phone,city,address,sku,product,quantity,price"
+            placeholder={`customer,phone,city,address,sku,product,quantity,price,currency (${workspace.baseCurrency})`}
             rows={4}
             required
           />
@@ -229,7 +225,7 @@ export default async function OrdersPage({
                   </td>
                   <td>{order.customer?.city ?? '-'}</td>
                   <td>{order.items.map((item) => `${item.quantity}x ${item.name}`).join(', ')}</td>
-                  <td>{money(order.totalAmount)}</td>
+                  <td>{formatMoney(order.totalAmount, workspace.baseCurrency, locale)}</td>
                   <td>
                     <span className="badge badge-muted">{order.status}</span>
                   </td>

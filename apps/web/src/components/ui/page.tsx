@@ -41,6 +41,46 @@ export function MetricCard({ label, value, help, badge, badgeTone = 'muted' }: M
   );
 }
 
+export function SectionHeader({
+  title,
+  description,
+  actions,
+}: {
+  title: string;
+  description?: string;
+  actions?: ReactNode;
+}) {
+  return (
+    <div className="section-header">
+      <div>
+        <h2 className="section-title">{title}</h2>
+        {description ? <p className="section-description">{description}</p> : null}
+      </div>
+      {actions ? <div className="actions-row">{actions}</div> : null}
+    </div>
+  );
+}
+
+export function SurfaceCard({
+  children,
+  className = '',
+}: {
+  children: ReactNode;
+  className?: string;
+}) {
+  return <section className={`card card-padded surface-card ${className}`}>{children}</section>;
+}
+
+export function StatusBadge({
+  children,
+  tone = 'muted',
+}: {
+  children: ReactNode;
+  tone?: 'success' | 'warning' | 'info' | 'muted' | 'danger';
+}) {
+  return <span className={`badge badge-${tone}`}>{children}</span>;
+}
+
 interface EmptyStateProps {
   icon: string;
   title: string;
@@ -63,6 +103,84 @@ export function EmptyState({ icon, title, description, action }: EmptyStateProps
           </div>
         ) : null}
       </div>
+    </div>
+  );
+}
+
+export function ErrorState({
+  title = 'We could not load this view',
+  description = 'Please retry. If the API is starting, this may take a moment on the free hosting tier.',
+  action,
+}: {
+  title?: string;
+  description?: string;
+  action?: ReactNode;
+}) {
+  return (
+    <div className="empty-state error-state">
+      <div>
+        <span className="empty-icon" aria-hidden="true">
+          ER
+        </span>
+        <h2 className="empty-title">{title}</h2>
+        <p className="empty-description">{description}</p>
+        {action ? (
+          <div className="actions-row" style={{ justifyContent: 'center', marginTop: 18 }}>
+            {action}
+          </div>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
+export function LoadingState({ title = 'Starting workspace...' }: { title?: string }) {
+  return (
+    <div className="loading-state" role="status" aria-live="polite">
+      <span className="spinner" aria-hidden="true" />
+      <span>{title}</span>
+    </div>
+  );
+}
+
+export function MetricCardSkeleton() {
+  return (
+    <div className="card metric-card skeleton-card" aria-hidden="true">
+      <span className="skeleton-line skeleton-short" />
+      <span className="skeleton-line skeleton-value" />
+      <span className="skeleton-line" />
+    </div>
+  );
+}
+
+export function TableSkeleton({ rows = 5 }: { rows?: number }) {
+  return (
+    <div className="table-wrap" aria-hidden="true">
+      <div className="skeleton-table">
+        {Array.from({ length: rows }).map((_, index) => (
+          <span className="skeleton-line" key={index} />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+export function AppPageSkeleton() {
+  return (
+    <div className="page-stack">
+      <div className="page-header">
+        <div>
+          <span className="skeleton-line skeleton-short" />
+          <span className="skeleton-line skeleton-title" />
+          <span className="skeleton-line skeleton-wide" />
+        </div>
+      </div>
+      <section className="stats-grid" aria-label="Loading metrics">
+        {Array.from({ length: 4 }).map((_, index) => (
+          <MetricCardSkeleton key={index} />
+        ))}
+      </section>
+      <TableSkeleton />
     </div>
   );
 }
@@ -103,7 +221,7 @@ export function ComingSoonPage({
   description,
   phase,
   icon,
-  primaryAction = 'Review setup',
+  primaryAction = 'Review workflow',
 }: ComingSoonPageProps) {
   return (
     <div className="page-stack">
@@ -121,11 +239,11 @@ export function ComingSoonPage({
       <div className="panel-grid">
         <EmptyState
           icon={icon}
-          title={`${title} is ready for data`}
-          description={`${phase}. The workspace is prepared, and this view will populate as soon as the related workflow is connected.`}
+          title={`${title} is ready for workspace data`}
+          description={`${phase}. Connect records to activate this operational view.`}
           action={
             <button className="button button-primary" type="button">
-              Continue setup
+              Review workflow
             </button>
           }
         />
@@ -133,14 +251,14 @@ export function ComingSoonPage({
         <section className="card card-padded">
           <h2 className="section-title">What happens here</h2>
           <p className="section-description">
-            This screen keeps the next action visible, so new users understand the workflow before
-            live records arrive.
+            This screen keeps the next action visible so teams understand the workflow before
+            records arrive.
           </p>
           <div style={{ marginTop: 18 }}>
             <SetupSteps
               steps={[
                 {
-                  title: 'Connect the source',
+                  title: 'Connect records',
                   copy: 'Add the integration or import records for this workflow.',
                 },
                 {
