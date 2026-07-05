@@ -17,6 +17,7 @@ const TITLES: Record<string, string> = {
   confirmation: 'confirmation',
   fulfillment: 'fulfillment',
   delivery: 'delivery',
+  automations: 'automations',
   campaigns: 'campaigns',
   inventory: 'inventory',
   finance: 'finance',

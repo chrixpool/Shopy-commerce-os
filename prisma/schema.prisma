@@ -65,6 +65,54 @@ enum DeliveryStatus {
   RETURNED
 }
 
+enum IntegrationProvider {
+  SHOPIFY
+  META_ADS
+  FACEBOOK_PAGE
+  INSTAGRAM
+  CSV
+  MANUAL
+}
+
+enum IntegrationStatus {
+  DISCONNECTED
+  CONNECTING
+  CONNECTED
+  ERROR
+  DISABLED
+}
+
+enum IntegrationMode {
+  READ_ONLY
+  DRAFT_ACTIONS
+  APPROVAL_REQUIRED
+  FULL_WRITE
+}
+
+enum AutomationRunStatus {
+  QUEUED
+  RUNNING
+  SUCCESS
+  FAILED
+  SKIPPED
+}
+
+enum ExternalEventStatus {
+  RECEIVED
+  PROCESSED
+  IGNORED
+  FAILED
+}
+
+enum DraftActionStatus {
+  DRAFT
+  PENDING_APPROVAL
+  APPROVED
+  REJECTED
+  EXECUTED
+  FAILED
+}
+
 // ─── AUTH (Auth.js v5 required tables) ──────────────────────────────────────
 
 model User {
@@ -146,6 +194,9 @@ model Organization {
   customers   Customer[]
   campaigns   Campaign[]
   automations Automation[]
+  automationRuns AutomationRun[]
+  externalEvents ExternalEvent[]
+  draftActions DraftAction[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -443,13 +494,18 @@ model Integration {
   provider    String  // shopify | meta | mescolis
   isActive    Boolean @default(false)
   credentials Json    @default("{}") // Encrypted in application layer
+  encryptedCredentials Json @default("{}")
   config      Json    @default("{}")
+  status      IntegrationStatus @default(DISCONNECTED)
+  mode        IntegrationMode @default(READ_ONLY)
+  errorMessage String?
   lastSyncAt  DateTime?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   @@unique([organizationId, provider])
+  @@index([organizationId, status])
 }
 
 // ─── AUTOMATIONS ────────────────────────────────────────────────────────────
@@ -461,14 +517,87 @@ model Automation {
 
   name      String
   isActive  Boolean @default(true)
+  enabled   Boolean @default(true)
+  provider  IntegrationProvider?
+  triggerType String?
+  actionType String?
+  dryRun    Boolean @default(true)
+  approvalRequired Boolean @default(true)
+  conditions Json @default("{}")
+  actionConfig Json @default("{}")
+  lastStatus String?
+  errorMessage String?
   trigger   Json    // { type, conditions }
   actions   Json    // [{ type, params }]
 
   lastRunAt   DateTime?
   runCount    Int @default(0)
+  runs         AutomationRun[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   @@index([organizationId])
+  @@index([organizationId, enabled])
+}
+
+model AutomationRun {
+  id             String @id @default(cuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  automationId String?
+  automation   Automation? @relation(fields: [automationId], references: [id], onDelete: SetNull)
+
+  status AutomationRunStatus @default(QUEUED)
+  startedAt DateTime @default(now())
+  finishedAt DateTime?
+  inputSnapshot Json @default("{}")
+  outputSnapshot Json @default("{}")
+  errorMessage String?
+  dryRun Boolean @default(true)
+  approvedBy String?
+
+  @@index([organizationId, startedAt])
+  @@index([automationId])
+}
+
+model ExternalEvent {
+  id             String @id @default(cuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  provider IntegrationProvider
+  eventType String
+  externalId String?
+  receivedAt DateTime @default(now())
+  payloadHash String
+  processedAt DateTime?
+  status ExternalEventStatus @default(RECEIVED)
+  errorMessage String?
+
+  @@unique([organizationId, provider, eventType, payloadHash])
+  @@index([organizationId, provider, receivedAt])
+  @@index([status])
+}
+
+model DraftAction {
+  id             String @id @default(cuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  provider IntegrationProvider
+  actionType String
+  title String
+  summary String
+  payload Json @default("{}")
+  status DraftActionStatus @default(DRAFT)
+  createdBy String?
+  approvedBy String?
+  executedAt DateTime?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([organizationId, status])
+  @@index([organizationId, provider])
 }

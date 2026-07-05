@@ -19,6 +19,7 @@ const WORK_ITEMS: NavItem[] = [
 ];
 
 const GROWTH_ITEMS: NavItem[] = [
+  { key: 'automations', href: 'automations', icon: 'AU' },
   { key: 'campaigns', href: 'campaigns', icon: 'AD' },
   { key: 'inventory', href: 'inventory', icon: 'IN' },
   { key: 'finance', href: 'finance', icon: 'FN' },

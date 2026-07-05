@@ -24,13 +24,39 @@ interface DashboardSummary {
   suggestions: Array<{ title: string; copy: string }>;
 }
 
+interface IntegrationStatus {
+  provider: string;
+  status: string;
+  mode: string;
+  lastSyncAt?: string | null;
+}
+
+interface DraftAction {
+  id: string;
+  title: string;
+  status: string;
+  provider: string;
+  createdAt: string;
+}
+
 export default async function DashboardPage({ params }: { params: Promise<{ locale: string }> }) {
   const { locale } = await params;
   const t = await getTranslations();
-  const [summary, workspace] = await Promise.all([
+  const [summary, workspace, integrations, draftActions] = await Promise.all([
     apiFetch<DashboardSummary>('/api/v1/dashboard/summary'),
     getWorkspaceSettings(),
+    apiFetch<IntegrationStatus[]>('/api/v1/integrations'),
+    apiFetch<DraftAction[]>('/api/v1/draft-actions'),
   ]);
+  const connectedChannels = integrations.filter(
+    (integration) => integration.status === 'CONNECTED',
+  );
+  const externalChannels = integrations.filter((integration) =>
+    ['SHOPIFY', 'META_ADS', 'FACEBOOK_PAGE', 'INSTAGRAM'].includes(integration.provider),
+  );
+  const pendingDrafts = draftActions.filter((action) =>
+    ['DRAFT', 'PENDING_APPROVAL'].includes(action.status),
+  );
   const rows = [
     {
       work: 'Confirm customers',
@@ -116,6 +142,20 @@ export default async function DashboardPage({ params }: { params: Promise<{ loca
           badge="DB"
           badgeTone="muted"
         />
+        <MetricCard
+          label="Connected channels"
+          value={String(connectedChannels.length)}
+          help="External and local channels available to automation."
+          badge={connectedChannels.length ? 'Online' : 'Manual'}
+          badgeTone={connectedChannels.length ? 'success' : 'muted'}
+        />
+        <MetricCard
+          label="Draft actions"
+          value={String(pendingDrafts.length)}
+          help="Automation recommendations waiting for review."
+          badge={pendingDrafts.length ? 'Review' : 'Clear'}
+          badgeTone={pendingDrafts.length ? 'warning' : 'success'}
+        />
       </section>
 
       <section className="command-grid">
@@ -169,6 +209,14 @@ export default async function DashboardPage({ params }: { params: Promise<{ loca
               <span>Stock control</span>
               <small>Check low inventory</small>
             </Link>
+            <Link className="quick-action" href={`/${locale}/automations`} prefetch>
+              <span>Automation rules</span>
+              <small>Run dry-run workflows</small>
+            </Link>
+            <Link className="quick-action" href={`/${locale}/settings`} prefetch>
+              <span>Connect channels</span>
+              <small>Manage integrations</small>
+            </Link>
           </div>
         </SurfaceCard>
       </section>
@@ -220,6 +268,39 @@ export default async function DashboardPage({ params }: { params: Promise<{ loca
                 {Object.values(summary.workQueues).filter((value) => Number(value) > 0).length}
               </strong>
             </div>
+          </div>
+        </SurfaceCard>
+
+        <SurfaceCard>
+          <SectionHeader
+            title="Automation cockpit"
+            description="Provider readiness and approval-gated actions."
+            actions={<StatusBadge tone="info">Dry-run first</StatusBadge>}
+          />
+          <div className="priority-list">
+            {externalChannels.map((integration) => (
+              <div className="priority-item" key={integration.provider}>
+                <span className="priority-dot" aria-hidden="true" />
+                <div>
+                  <p className="step-title">{integration.provider.replaceAll('_', ' ')}</p>
+                  <p className="step-copy">
+                    <StatusBadge tone={integration.status === 'CONNECTED' ? 'success' : 'muted'}>
+                      {integration.status.replaceAll('_', ' ')}
+                    </StatusBadge>{' '}
+                    {integration.mode.replaceAll('_', ' ').toLowerCase()}
+                  </p>
+                </div>
+              </div>
+            ))}
+            {pendingDrafts.slice(0, 3).map((action) => (
+              <div className="priority-item" key={action.id}>
+                <span className="priority-dot" aria-hidden="true" />
+                <div>
+                  <p className="step-title">{action.title}</p>
+                  <p className="step-copy">{action.provider.replaceAll('_', ' ')} draft action</p>
+                </div>
+              </div>
+            ))}
           </div>
         </SurfaceCard>
       </section>

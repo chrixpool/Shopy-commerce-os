@@ -1,5 +1,5 @@
 import { revalidatePath } from 'next/cache';
-import { MetricCard, PageHeader } from '@/components/ui/page';
+import { MetricCard, PageHeader, StatusBadge, SurfaceCard } from '@/components/ui/page';
 import { apiFetch } from '@/lib/api';
 import { formatMoney, SUPPORTED_CURRENCIES } from '@/lib/currency';
 
@@ -15,8 +15,10 @@ interface Organization {
 interface Integration {
   provider: string;
   label: string;
-  isActive: boolean;
-  source: string;
+  status: string;
+  mode: string;
+  capabilities?: Record<string, boolean>;
+  config?: Record<string, unknown>;
   lastSyncAt?: string | null;
 }
 
@@ -36,14 +38,48 @@ async function updateOrganization(formData: FormData) {
   revalidatePath('/[locale]/dashboard', 'layout');
 }
 
+async function connectIntegration(formData: FormData) {
+  'use server';
+
+  const provider = String(formData.get('provider') ?? '');
+  await apiFetch(`/api/v1/integrations/${provider.toLowerCase().replaceAll('_', '-')}/connect`, {
+    method: 'POST',
+    body: JSON.stringify({
+      shopDomain: String(formData.get('shopDomain') ?? ''),
+      accountId: String(formData.get('accountId') ?? ''),
+      pageId: String(formData.get('pageId') ?? ''),
+      instagramBusinessAccountId: String(formData.get('instagramBusinessAccountId') ?? ''),
+      accessToken: String(formData.get('accessToken') ?? ''),
+      mode: String(formData.get('mode') ?? 'READ_ONLY'),
+    }),
+  });
+
+  revalidatePath('/[locale]/settings', 'page');
+}
+
+async function syncIntegration(formData: FormData) {
+  'use server';
+
+  const provider = String(formData.get('provider') ?? '');
+  await apiFetch(`/api/v1/integrations/${provider.toLowerCase().replaceAll('_', '-')}/sync`, {
+    method: 'POST',
+    body: JSON.stringify({ dryRun: formData.get('dryRun') === 'true' }),
+  });
+
+  revalidatePath('/[locale]/settings', 'page');
+  revalidatePath('/[locale]/campaigns', 'page');
+  revalidatePath('/[locale]/dashboard', 'page');
+}
+
 export default async function SettingsPage({ params }: { params: Promise<{ locale: string }> }) {
   const { locale } = await params;
   const [organization, integrations] = await Promise.all([
     apiFetch<Organization>('/api/v1/settings/organization'),
-    apiFetch<Integration[]>('/api/v1/settings/integrations'),
+    apiFetch<Integration[]>('/api/v1/integrations'),
   ]);
-  const shopify = integrations.find((integration) => integration.provider === 'shopify');
-  const connectedCount = integrations.filter((integration) => integration.isActive).length;
+  const connectedCount = integrations.filter(
+    (integration) => integration.status === 'CONNECTED',
+  ).length;
 
   return (
     <div className="page-stack">
@@ -85,9 +121,9 @@ export default async function SettingsPage({ params }: { params: Promise<{ local
         <MetricCard
           label="Integrations"
           value={String(connectedCount)}
-          help="Connected system and integration cards."
-          badge={shopify?.isActive ? 'Shopify on' : 'Manual-first'}
-          badgeTone={shopify?.isActive ? 'success' : 'muted'}
+          help="Connected provider and system channels."
+          badge={connectedCount ? 'Channels on' : 'Manual-first'}
+          badgeTone={connectedCount ? 'success' : 'muted'}
         />
       </section>
 
@@ -144,29 +180,150 @@ export default async function SettingsPage({ params }: { params: Promise<{ local
         </form>
 
         <aside className="card card-padded">
-          <h2 className="section-title">Integration status</h2>
+          <h2 className="section-title">Automation safety</h2>
           <p className="section-description">
-            Current capabilities are configured for free-first operations.
+            Provider writes stay draft-first or approval-gated. Shopy does not spend ad budget,
+            publish posts, or send messages automatically.
           </p>
           <div className="step-list" style={{ marginTop: 18 }}>
-            {integrations.map((integration) => (
-              <div className="step-item" key={`${integration.provider}-${integration.source}`}>
-                <span className="step-number">{integration.label.slice(0, 2).toUpperCase()}</span>
-                <div>
-                  <p className="step-title">{integration.label}</p>
-                  <p className="step-copy">
-                    <span
-                      className={`badge ${integration.isActive ? 'badge-success' : 'badge-muted'}`}
-                    >
-                      {integration.isActive ? 'Connected' : 'Not connected'}
-                    </span>
-                  </p>
+            {['Read-only sync', 'Draft actions', 'Approval queue', 'Manual publish'].map(
+              (item, index) => (
+                <div className="step-item" key={item}>
+                  <span className="step-number">{index + 1}</span>
+                  <div>
+                    <p className="step-title">{item}</p>
+                    <p className="step-copy">
+                      Enabled without paid APIs or automatic external writes.
+                    </p>
+                  </div>
                 </div>
-              </div>
-            ))}
+              ),
+            )}
           </div>
         </aside>
       </section>
+
+      <SurfaceCard>
+        <div className="section-header">
+          <div>
+            <h2 className="section-title">Integrations</h2>
+            <p className="section-description">
+              Connect channels for read-only sync and draft recommendations. Tokens are encrypted at
+              rest when saved and never shown again.
+            </p>
+          </div>
+        </div>
+        <div className="queue-grid" style={{ marginTop: 18 }}>
+          {integrations.map((integration) => {
+            const isExternal = ['SHOPIFY', 'META_ADS', 'FACEBOOK_PAGE', 'INSTAGRAM'].includes(
+              integration.provider,
+            );
+            return (
+              <div className="queue-card" key={integration.provider}>
+                <div className="queue-card-header">
+                  <div>
+                    <p className="queue-title">{integration.label}</p>
+                    <p className="queue-meta">
+                      {integration.mode.replaceAll('_', ' ').toLowerCase()} mode
+                    </p>
+                  </div>
+                  <StatusBadge tone={integration.status === 'CONNECTED' ? 'success' : 'muted'}>
+                    {integration.status.replaceAll('_', ' ')}
+                  </StatusBadge>
+                </div>
+                <p className="section-description">
+                  {integration.provider === 'SHOPIFY'
+                    ? 'Imports orders, products, customers, and inventory. Store writes are disabled in this phase.'
+                    : integration.provider === 'META_ADS'
+                      ? 'Reads campaign performance and creates draft recommendations. Budgets are never changed.'
+                      : integration.provider === 'FACEBOOK_PAGE'
+                        ? 'Reads page activity and creates draft post/reply ideas. Publishing is disabled.'
+                        : integration.provider === 'INSTAGRAM'
+                          ? 'Reads profile/media metrics and creates draft content ideas. Publishing is disabled.'
+                          : 'Available without external credentials.'}
+                </p>
+                {isExternal ? (
+                  <form action={connectIntegration} className="form-grid compact-form">
+                    <input name="provider" type="hidden" value={integration.provider} />
+                    <input name="mode" type="hidden" value="READ_ONLY" />
+                    {integration.provider === 'SHOPIFY' ? (
+                      <label className="form-field" style={{ gridColumn: '1 / -1' }}>
+                        <span>Shop domain</span>
+                        <input
+                          className="field"
+                          name="shopDomain"
+                          placeholder="your-store.myshopify.com"
+                        />
+                      </label>
+                    ) : null}
+                    {integration.provider === 'META_ADS' ? (
+                      <label className="form-field" style={{ gridColumn: '1 / -1' }}>
+                        <span>Ad account ID</span>
+                        <input className="field" name="accountId" placeholder="act_..." />
+                      </label>
+                    ) : null}
+                    {integration.provider === 'FACEBOOK_PAGE' ? (
+                      <label className="form-field" style={{ gridColumn: '1 / -1' }}>
+                        <span>Page ID</span>
+                        <input className="field" name="pageId" placeholder="Facebook page ID" />
+                      </label>
+                    ) : null}
+                    {integration.provider === 'INSTAGRAM' ? (
+                      <label className="form-field" style={{ gridColumn: '1 / -1' }}>
+                        <span>Business account ID</span>
+                        <input
+                          className="field"
+                          name="instagramBusinessAccountId"
+                          placeholder="Instagram business account ID"
+                        />
+                      </label>
+                    ) : null}
+                    <label className="form-field" style={{ gridColumn: '1 / -1' }}>
+                      <span>Access token</span>
+                      <input
+                        className="field"
+                        name="accessToken"
+                        placeholder="Paste token to replace saved credential"
+                        type="password"
+                      />
+                    </label>
+                    <div className="form-actions">
+                      <button className="button button-secondary" type="submit">
+                        Save connection
+                      </button>
+                    </div>
+                  </form>
+                ) : null}
+                <div className="button-row">
+                  <form action={syncIntegration}>
+                    <input name="provider" type="hidden" value={integration.provider} />
+                    <input name="dryRun" type="hidden" value="true" />
+                    <button className="button button-secondary" type="submit">
+                      Dry-run sync
+                    </button>
+                  </form>
+                  <form action={syncIntegration}>
+                    <input name="provider" type="hidden" value={integration.provider} />
+                    <input name="dryRun" type="hidden" value="false" />
+                    <button className="button button-primary" type="submit">
+                      Sync now
+                    </button>
+                  </form>
+                </div>
+                <p className="field-help">
+                  Last sync:{' '}
+                  {integration.lastSyncAt
+                    ? new Intl.DateTimeFormat(locale, {
+                        dateStyle: 'medium',
+                        timeStyle: 'short',
+                      }).format(new Date(integration.lastSyncAt))
+                    : 'Not synced yet'}
+                </p>
+              </div>
+            );
+          })}
+        </div>
+      </SurfaceCard>
     </div>
   );
 }

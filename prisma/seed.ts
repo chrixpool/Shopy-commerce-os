@@ -1,4 +1,12 @@
-import { PrismaClient, OrderStatus } from '@prisma/client';
+import {
+  AutomationRunStatus,
+  DraftActionStatus,
+  IntegrationMode,
+  IntegrationProvider,
+  IntegrationStatus,
+  OrderStatus,
+  PrismaClient,
+} from '@prisma/client';
 import bcrypt from 'bcryptjs';
 
 const prisma = new PrismaClient();
@@ -169,17 +177,166 @@ async function main() {
     },
   });
 
-  await prisma.integration.upsert({
-    where: { organizationId_provider: { organizationId: org.id, provider: 'shopify' } },
-    update: { isActive: false, config: { mode: 'local-placeholder' } },
-    create: {
-      organizationId: org.id,
-      provider: 'shopify',
+  await prisma.integration.deleteMany({
+    where: { organizationId: org.id, provider: { in: ['shopify'] } },
+  });
+
+  const seededIntegrations = [
+    {
+      provider: IntegrationProvider.SHOPIFY,
+      label: 'Shopify',
+      status: IntegrationStatus.DISCONNECTED,
+      mode: IntegrationMode.READ_ONLY,
       isActive: false,
-      credentials: {},
-      config: { mode: 'local-placeholder' },
+    },
+    {
+      provider: IntegrationProvider.META_ADS,
+      label: 'Meta Ads',
+      status: IntegrationStatus.DISCONNECTED,
+      mode: IntegrationMode.READ_ONLY,
+      isActive: false,
+    },
+    {
+      provider: IntegrationProvider.FACEBOOK_PAGE,
+      label: 'Facebook Page',
+      status: IntegrationStatus.DISCONNECTED,
+      mode: IntegrationMode.DRAFT_ACTIONS,
+      isActive: false,
+    },
+    {
+      provider: IntegrationProvider.INSTAGRAM,
+      label: 'Instagram',
+      status: IntegrationStatus.DISCONNECTED,
+      mode: IntegrationMode.DRAFT_ACTIONS,
+      isActive: false,
+    },
+    {
+      provider: IntegrationProvider.CSV,
+      label: 'CSV import',
+      status: IntegrationStatus.CONNECTED,
+      mode: IntegrationMode.READ_ONLY,
+      isActive: true,
+    },
+    {
+      provider: IntegrationProvider.MANUAL,
+      label: 'Manual workflows',
+      status: IntegrationStatus.CONNECTED,
+      mode: IntegrationMode.APPROVAL_REQUIRED,
+      isActive: true,
+    },
+  ];
+
+  for (const integration of seededIntegrations) {
+    await prisma.integration.upsert({
+      where: {
+        organizationId_provider: { organizationId: org.id, provider: integration.provider },
+      },
+      update: {
+        isActive: integration.isActive,
+        status: integration.status,
+        mode: integration.mode,
+        credentials: {},
+        encryptedCredentials: {},
+        config: { label: integration.label, seeded: true },
+        errorMessage: null,
+      },
+      create: {
+        organizationId: org.id,
+        provider: integration.provider,
+        isActive: integration.isActive,
+        status: integration.status,
+        mode: integration.mode,
+        credentials: {},
+        encryptedCredentials: {},
+        config: { label: integration.label, seeded: true },
+      },
+    });
+  }
+
+  const existingStarterAutomation = await prisma.automation.findFirst({
+    where: { organizationId: org.id, name: 'Flag delayed confirmations' },
+    select: { id: true },
+  });
+  const starterAutomation = existingStarterAutomation
+    ? await prisma.automation.update({
+        where: { id: existingStarterAutomation.id },
+        data: {
+          enabled: true,
+          provider: IntegrationProvider.MANUAL,
+          triggerType: 'confirmation_delayed',
+          actionType: 'create_smart_suggestion',
+          dryRun: true,
+          approvalRequired: true,
+          conditions: { olderThanHours: 24 },
+          actionConfig: { priority: 'high' },
+        },
+      })
+    : await prisma.automation.create({
+        data: {
+          organizationId: org.id,
+          name: 'Flag delayed confirmations',
+          trigger: { type: 'confirmation_delayed', conditions: { olderThanHours: 24 } },
+          actions: [{ type: 'create_smart_suggestion', params: { priority: 'high' } }],
+          enabled: true,
+          provider: IntegrationProvider.MANUAL,
+          triggerType: 'confirmation_delayed',
+          actionType: 'create_smart_suggestion',
+          dryRun: true,
+          approvalRequired: true,
+          conditions: { olderThanHours: 24 },
+          actionConfig: { priority: 'high' },
+        },
+      });
+
+  await prisma.automationRun.deleteMany({
+    where: {
+      automationId: starterAutomation.id,
+      inputSnapshot: { path: ['seeded'], equals: true },
     },
   });
+  await prisma.automationRun.create({
+    data: {
+      organizationId: org.id,
+      automationId: starterAutomation.id,
+      status: AutomationRunStatus.SUCCESS,
+      dryRun: true,
+      inputSnapshot: { seeded: true },
+      outputSnapshot: { suggestion: 'Review delayed confirmation queue' },
+      finishedAt: new Date(),
+    },
+  });
+
+  const existingDraftAction = await prisma.draftAction.findFirst({
+    where: {
+      organizationId: org.id,
+      provider: IntegrationProvider.META_ADS,
+      actionType: 'recommend_campaign_review',
+      title: 'Review high-spend campaigns',
+    },
+    select: { id: true },
+  });
+  const draftActionData = {
+    status: DraftActionStatus.PENDING_APPROVAL,
+    summary: 'Sample draft recommendation. Shopy will not edit budgets or launch campaigns.',
+    payload: { seeded: true },
+  };
+  if (existingDraftAction) {
+    await prisma.draftAction.update({
+      where: { id: existingDraftAction.id },
+      data: draftActionData,
+    });
+  } else {
+    await prisma.draftAction.create({
+      data: {
+        organizationId: org.id,
+        provider: IntegrationProvider.META_ADS,
+        actionType: 'recommend_campaign_review',
+        title: 'Review high-spend campaigns',
+        createdBy: owner.id,
+        ...draftActionData,
+      },
+    });
+  }
 
   const inviteExpiresAt = new Date();
   inviteExpiresAt.setDate(inviteExpiresAt.getDate() + 7);

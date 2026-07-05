@@ -9,6 +9,8 @@ Shopy is a zero-spend local/online MVP for commerce operations: auth, dashboard,
 - Auth.js credentials sign-in.
 - DB-backed dashboard metrics and local rule-based smart suggestions.
 - Manual order creation and CSV order import.
+- Automation rules with dry-run execution, run logs, and an approval queue for draft actions.
+- Optional integration foundation for Shopify, Meta Ads, Facebook Pages, and Instagram.
 - Confirmation queue with manual call statuses plus `tel:` and `wa.me` click links.
 - Fulfillment queue with packing status and stock decrement on packed orders.
 - Manual delivery parcel events/status updates.
@@ -24,7 +26,30 @@ Shopy is a zero-spend local/online MVP for commerce operations: auth, dashboard,
 - Delivery tracking: manual parcel events first, no courier API.
 - Analytics: internal DB metrics only.
 - AI: local rule-based suggestions only, no paid LLM API.
-- Shopify: optional future integration, disabled by default.
+- Shopify, Meta Ads, Facebook Pages, and Instagram: optional read-only or draft-first integrations, disconnected by default.
+
+## Automation And Integrations
+
+Shopy now includes a safe automation foundation built around provider adapters, dry-run rules, and approval-gated draft actions.
+
+- Shopify can be connected manually with a shop domain and Admin API token for read-only order, product, customer, and inventory sync.
+- Meta Ads is read-only in this phase. Shopy can store campaign snapshots and create draft recommendations, but it will not launch ads, pause ads, or change budgets.
+- Facebook Page and Instagram integrations are read-only plus draft-first. Shopy can collect channel context and prepare draft content ideas, but it will not publish posts automatically.
+- Manual workflows, CSV import, and local smart suggestions remain available without external credentials.
+
+All external write-capable paths are dry-run or approval-gated. No ad spend, publishing, messaging, email, SMS, courier, AI, or payment API is required.
+
+### Provider Setup Notes
+
+For local testing, add only the provider values you actually need:
+
+- `INTEGRATION_SECRET_KEY`: required before saving encrypted provider tokens.
+- `SHOPIFY_SHOP_DOMAIN`, `SHOPIFY_ADMIN_ACCESS_TOKEN`, `SHOPIFY_WEBHOOK_SECRET`: optional Shopify read-only sync and webhook validation.
+- `META_ACCESS_TOKEN`, `META_AD_ACCOUNT_ID`: optional Meta Ads read-only reporting.
+- `FACEBOOK_PAGE_ID`, `FACEBOOK_PAGE_ACCESS_TOKEN`: optional Facebook Page read-only reporting.
+- `INSTAGRAM_BUSINESS_ACCOUNT_ID`, `INSTAGRAM_ACCESS_TOKEN`: optional Instagram read-only reporting.
+
+Provider permissions and app review may be required by Shopify or Meta before real live data is available. The app still works without those approvals.
 
 ## Windows 32-bit Local Notes
 

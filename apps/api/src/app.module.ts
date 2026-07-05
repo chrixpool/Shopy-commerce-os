@@ -11,6 +11,8 @@ import { OrdersModule } from './modules/orders/orders.module';
 import { WorkflowsModule } from './modules/workflows/workflows.module';
 import { InventoryModule } from './modules/inventory/inventory.module';
 import { SettingsModule } from './modules/settings/settings.module';
+import { IntegrationsModule } from './modules/integrations/integrations.module';
+import { AutomationsModule } from './modules/automations/automations.module';
 
 @Module({
   imports: [
@@ -33,6 +35,8 @@ import { SettingsModule } from './modules/settings/settings.module';
     WorkflowsModule,
     InventoryModule,
     SettingsModule,
+    IntegrationsModule,
+    AutomationsModule,
     // Phase 2
     ShopifyModule,
   ],

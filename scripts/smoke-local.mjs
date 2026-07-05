@@ -99,6 +99,57 @@ const updated = await request(`${apiUrl}/api/v1/orders/${created.body.id}/status
 assert(updated.body?.status === 'CONFIRMED', 'Order status update did not persist');
 results.push('Orders status update');
 
+const integrations = await request(`${apiUrl}/api/v1/integrations`, { headers });
+assert(Array.isArray(integrations.body), 'Integrations list did not return an array');
+assert(
+  integrations.body.some((integration) => integration.provider === 'SHOPIFY'),
+  'Shopify disconnected integration state is missing',
+);
+results.push('Integrations list');
+
+const shopify = await request(`${apiUrl}/api/v1/integrations/shopify`, { headers });
+assert(shopify.body?.provider === 'SHOPIFY', 'Shopify integration detail did not load');
+results.push('Shopify disconnected state');
+
+const dryRunAutomation = await request(`${apiUrl}/api/v1/automations`, {
+  method: 'POST',
+  headers,
+  body: JSON.stringify({
+    name: `Smoke dry-run automation ${Date.now()}`,
+    provider: 'MANUAL',
+    triggerType: 'order_created',
+    actionType: 'create_draft_action',
+    dryRun: true,
+    approvalRequired: true,
+    conditions: {},
+    actionConfig: {},
+  }),
+});
+assert(dryRunAutomation.body?.id, 'Automation create did not return an id');
+results.push('Automation create');
+
+const automationRun = await request(`${apiUrl}/api/v1/automations/${dryRunAutomation.body.id}/test`, {
+  method: 'POST',
+  headers,
+});
+assert(automationRun.body?.run?.status === 'SUCCESS', 'Automation dry-run did not succeed');
+results.push('Automation dry-run');
+
+const draftActions = await request(`${apiUrl}/api/v1/draft-actions`, { headers });
+assert(Array.isArray(draftActions.body), 'Draft action list did not return an array');
+const smokeDraft = draftActions.body.find(
+  (action) => action.title === `Review ${dryRunAutomation.body.name}`,
+);
+if (smokeDraft) {
+  const rejected = await request(`${apiUrl}/api/v1/draft-actions/${smokeDraft.id}/status`, {
+    method: 'PATCH',
+    headers,
+    body: JSON.stringify({ status: 'REJECTED' }),
+  });
+  assert(rejected.body?.status === 'REJECTED', 'Draft action status update did not persist');
+}
+results.push('Draft action queue');
+
 try {
   const csrf = await request(`${webUrl}/api/auth/csrf`);
   const cookie = csrf.response.headers.get('set-cookie')?.split(';')[0];
