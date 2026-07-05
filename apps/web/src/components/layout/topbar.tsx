@@ -28,9 +28,10 @@ const TITLES: Record<string, string> = {
 interface TopbarProps {
   session: Session;
   locale: string;
+  onMenuClick: () => void;
 }
 
-export function Topbar({ session, locale }: TopbarProps) {
+export function Topbar({ session, locale, onMenuClick }: TopbarProps) {
   const router = useRouter();
   const pathname = usePathname();
   const t = useTranslations('nav');
@@ -44,9 +45,21 @@ export function Topbar({ session, locale }: TopbarProps) {
 
   return (
     <header className="topbar">
-      <div>
-        <div className="topbar-title">{t(titleKey)}</div>
-        <div className="topbar-subtitle">Know what needs attention and move work forward.</div>
+      <div className="topbar-context">
+        <button
+          aria-label="Open navigation"
+          className="icon-button menu-button"
+          onClick={onMenuClick}
+          type="button"
+        >
+          <svg aria-hidden="true" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path d="M4 7h16M4 12h16M4 17h16" strokeWidth="2" strokeLinecap="round" />
+          </svg>
+        </button>
+        <div>
+          <div className="topbar-title">{t(titleKey)}</div>
+          <div className="topbar-subtitle">Know what needs attention and move work forward.</div>
+        </div>
       </div>
 
       <div className="topbar-actions">

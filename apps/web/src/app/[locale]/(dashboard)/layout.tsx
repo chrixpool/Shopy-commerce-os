@@ -1,5 +1,4 @@
-import { Sidebar } from '@/components/layout/sidebar';
-import { Topbar } from '@/components/layout/topbar';
+import { AppShell } from '@/components/layout/app-shell';
 import { auth } from '@/lib/auth';
 import { redirect } from 'next/navigation';
 
@@ -18,14 +17,8 @@ export default async function DashboardLayout({
   }
 
   return (
-    <div className="app-shell">
-      <Sidebar locale={locale} />
-      <div className="app-main">
-        <Topbar session={session} locale={locale} />
-        <main className="content-area">
-          <div className="content-inner">{children}</div>
-        </main>
-      </div>
-    </div>
+    <AppShell session={session} locale={locale}>
+      {children}
+    </AppShell>
   );
 }

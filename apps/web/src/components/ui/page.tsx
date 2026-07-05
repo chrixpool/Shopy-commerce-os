@@ -25,7 +25,7 @@ interface MetricCardProps {
   value: string;
   help: string;
   badge?: string;
-  badgeTone?: 'success' | 'warning' | 'info' | 'muted';
+  badgeTone?: 'success' | 'warning' | 'info' | 'muted' | 'danger';
 }
 
 export function MetricCard({ label, value, help, badge, badgeTone = 'muted' }: MetricCardProps) {

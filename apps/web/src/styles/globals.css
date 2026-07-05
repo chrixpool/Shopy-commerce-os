@@ -102,9 +102,7 @@ a {
 }
 
 .app-shell {
-  display: grid;
   min-height: 100dvh;
-  grid-template-columns: var(--sidebar-width) minmax(0, 1fr);
   background: var(--background);
 }
 
@@ -127,13 +125,50 @@ a {
 }
 
 .sidebar {
-  position: sticky;
+  position: fixed;
   top: 0;
+  inset-inline-start: 0;
+  z-index: 50;
   display: flex;
+  width: var(--sidebar-width);
+  max-width: calc(100vw - 28px);
   height: 100dvh;
   flex-direction: column;
   border-inline-end: 1px solid var(--border);
   background: var(--surface);
+  box-shadow: var(--shadow-lg);
+  pointer-events: none;
+  transform: translateX(-105%);
+  transition:
+    transform 180ms ease,
+    box-shadow 180ms ease;
+  will-change: transform;
+}
+
+[dir='rtl'] .sidebar {
+  transform: translateX(105%);
+}
+
+.sidebar-open,
+[dir='rtl'] .sidebar-open {
+  pointer-events: auto;
+  transform: translateX(0);
+}
+
+.sidebar-scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 45;
+  border: 0;
+  background: rgba(15, 23, 42, 0.28);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 180ms ease;
+}
+
+.sidebar-scrim-visible {
+  opacity: 1;
+  pointer-events: auto;
 }
 
 .sidebar-brand {
@@ -232,6 +267,11 @@ a {
   flex: 0 0 auto;
 }
 
+.nav-icon svg {
+  width: 18px;
+  height: 18px;
+}
+
 .nav-link-active .nav-icon {
   background: var(--brand);
   color: var(--text-inverse);
@@ -256,6 +296,46 @@ a {
   background: rgba(255, 255, 255, 0.92);
   padding: 0 24px;
   backdrop-filter: blur(12px);
+}
+
+.topbar-context {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 12px;
+}
+
+.icon-button {
+  display: inline-flex;
+  width: 38px;
+  height: 38px;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--text-2);
+  cursor: pointer;
+  transition:
+    background 160ms ease,
+    border-color 160ms ease,
+    color 160ms ease,
+    transform 160ms ease;
+}
+
+.icon-button:hover {
+  border-color: var(--brand);
+  background: var(--brand-soft);
+  color: var(--brand-strong);
+}
+
+.icon-button:active {
+  transform: translateY(1px);
+}
+
+.icon-button svg {
+  width: 20px;
+  height: 20px;
 }
 
 .topbar-title {
@@ -991,46 +1071,23 @@ a {
     width: 100%;
   }
 
-  .app-shell {
-    grid-template-columns: 1fr;
-  }
-
-  .sidebar {
-    position: static;
-    height: auto;
-    border-inline-end: 0;
-    border-bottom: 1px solid var(--border);
-  }
-
   .sidebar-brand {
     min-height: 56px;
   }
 
   .nav-section {
-    overflow-x: auto;
     padding: 10px 12px;
   }
 
-  .nav-heading,
-  .sidebar-footer {
-    display: none;
-  }
-
-  .nav-list {
-    display: flex;
-    min-width: max-content;
-  }
-
   .topbar {
-    position: static;
-    align-items: flex-start;
-    flex-direction: column;
+    align-items: center;
+    flex-wrap: wrap;
     padding: 14px 16px;
   }
 
-  .topbar-actions,
-  .search-box {
+  .topbar-actions {
     width: 100%;
+    justify-content: flex-end;
   }
 
   .content-area {
@@ -1104,14 +1161,6 @@ a {
     font-size: 23px;
   }
 
-  .sidebar {
-    position: sticky;
-    top: 0;
-    z-index: 30;
-    background: rgba(255, 255, 255, 0.96);
-    backdrop-filter: blur(12px);
-  }
-
   .sidebar-brand {
     min-height: 54px;
     padding: 0 14px;
@@ -1135,14 +1184,12 @@ a {
   }
 
   .nav-list {
-    gap: 6px;
-    padding-bottom: 2px;
+    gap: 4px;
   }
 
   .nav-link {
     min-height: 38px;
     gap: 7px;
-    white-space: nowrap;
     padding: 7px 9px;
   }
 
@@ -1157,6 +1204,10 @@ a {
     padding: 12px;
   }
 
+  .topbar-context {
+    width: 100%;
+  }
+
   .topbar-title {
     font-size: 14px;
   }
@@ -1168,7 +1219,7 @@ a {
 
   .topbar-actions {
     display: grid;
-    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-columns: auto minmax(0, 1fr) auto;
     gap: 8px;
   }
 
@@ -1188,16 +1239,17 @@ a {
     padding-inline-end: 8px;
   }
 
+  .topbar-actions > .button {
+    grid-column: 1 / -1;
+    justify-content: center;
+    width: 100%;
+  }
+
   .chip-text {
     overflow: hidden;
     max-width: 42vw;
     text-overflow: ellipsis;
     white-space: nowrap;
-  }
-
-  .topbar-actions > .button {
-    grid-column: 1 / -1;
-    width: 100%;
   }
 
   .content-area {
