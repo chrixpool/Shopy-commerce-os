@@ -40,6 +40,35 @@ interface Template {
   provider: string;
 }
 
+const STARTER_TEMPLATES: Template[] = [
+  {
+    name: 'Flag orders not confirmed after 24h',
+    triggerType: 'confirmation_delayed',
+    actionType: 'create_smart_suggestion',
+    provider: 'MANUAL',
+  },
+  {
+    name: 'Suggest restock when stock drops below threshold',
+    triggerType: 'low_stock_detected',
+    actionType: 'recommend_inventory_restock',
+    provider: 'MANUAL',
+  },
+  {
+    name: 'Create delivery follow-up for failed parcels',
+    triggerType: 'delivery_failed',
+    actionType: 'recommend_delivery_followup',
+    provider: 'MANUAL',
+  },
+];
+
+async function optionalApiFetch<T>(path: string, fallback: T) {
+  try {
+    return await apiFetch<T>(path);
+  } catch {
+    return fallback;
+  }
+}
+
 async function createAutomation(formData: FormData) {
   'use server';
 
@@ -81,11 +110,14 @@ async function updateDraftAction(formData: FormData) {
 
 export default async function AutomationsPage() {
   const [rules, runs, drafts, templates, integrations] = await Promise.all([
-    apiFetch<AutomationRule[]>('/api/v1/automations'),
-    apiFetch<AutomationRun[]>('/api/v1/automations/runs'),
-    apiFetch<DraftAction[]>('/api/v1/draft-actions'),
-    apiFetch<Template[]>('/api/v1/automations/templates'),
-    apiFetch<Array<{ provider: string; status: string; mode: string }>>('/api/v1/integrations'),
+    optionalApiFetch<AutomationRule[]>('/api/v1/automations', []),
+    optionalApiFetch<AutomationRun[]>('/api/v1/automations/runs', []),
+    optionalApiFetch<DraftAction[]>('/api/v1/draft-actions', []),
+    optionalApiFetch<Template[]>('/api/v1/automations/templates', STARTER_TEMPLATES),
+    optionalApiFetch<Array<{ provider: string; status: string; mode: string }>>(
+      '/api/v1/integrations',
+      [],
+    ),
   ]);
 
   const enabledRules = rules.filter((rule) => rule.enabled).length;

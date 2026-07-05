@@ -49,13 +49,11 @@ function NavGroup({
   items,
   locale,
   pathname,
-  onNavigate,
 }: {
   title: string;
   items: NavItem[];
   locale: string;
   pathname: string;
-  onNavigate: () => void;
 }) {
   const t = useTranslations('nav');
 
@@ -73,12 +71,12 @@ function NavGroup({
                 prefetch
                 className={`nav-link${isActive ? ' nav-link-active' : ''}`}
                 aria-current={isActive ? 'page' : undefined}
-                onClick={onNavigate}
+                title={t(item.key)}
               >
                 <span className="nav-icon" aria-hidden="true">
                   <NavIcon name={item.icon} />
                 </span>
-                <span>{t(item.key)}</span>
+                <span className="nav-label">{t(item.key)}</span>
               </Link>
             </li>
           );
@@ -88,20 +86,15 @@ function NavGroup({
   );
 }
 
-export function Sidebar({
-  locale,
-  isOpen,
-  onClose,
-}: {
-  locale: string;
-  isOpen: boolean;
-  onClose: () => void;
-}) {
+export function Sidebar({ locale, isExpanded }: { locale: string; isExpanded: boolean }) {
   const pathname = usePathname();
 
   return (
-    <aside className={`sidebar${isOpen ? ' sidebar-open' : ''}`} aria-hidden={!isOpen}>
-      <Link className="sidebar-brand" href={`/${locale}/dashboard`} onClick={onClose}>
+    <aside
+      className={`sidebar${isExpanded ? ' sidebar-expanded-panel' : ''}`}
+      aria-label="Main navigation"
+    >
+      <Link className="sidebar-brand" href={`/${locale}/dashboard`} title="Shopy dashboard">
         <span className="brand-mark">S</span>
         <span className="brand-copy">
           <span className="brand-name">Shopy</span>
@@ -110,27 +103,9 @@ export function Sidebar({
       </Link>
 
       <nav aria-label="Main navigation">
-        <NavGroup
-          title="Operate"
-          items={WORK_ITEMS}
-          locale={locale}
-          pathname={pathname}
-          onNavigate={onClose}
-        />
-        <NavGroup
-          title="Grow"
-          items={GROWTH_ITEMS}
-          locale={locale}
-          pathname={pathname}
-          onNavigate={onClose}
-        />
-        <NavGroup
-          title="Manage"
-          items={ADMIN_ITEMS}
-          locale={locale}
-          pathname={pathname}
-          onNavigate={onClose}
-        />
+        <NavGroup title="Operate" items={WORK_ITEMS} locale={locale} pathname={pathname} />
+        <NavGroup title="Grow" items={GROWTH_ITEMS} locale={locale} pathname={pathname} />
+        <NavGroup title="Manage" items={ADMIN_ITEMS} locale={locale} pathname={pathname} />
       </nav>
 
       <div className="sidebar-footer">

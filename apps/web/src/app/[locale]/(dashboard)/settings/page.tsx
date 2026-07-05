@@ -22,6 +22,28 @@ interface Integration {
   lastSyncAt?: string | null;
 }
 
+const FALLBACK_INTEGRATIONS: Integration[] = [
+  { provider: 'CSV', label: 'CSV import', status: 'CONNECTED', mode: 'READ_ONLY' },
+  { provider: 'MANUAL', label: 'Manual workflows', status: 'CONNECTED', mode: 'APPROVAL_REQUIRED' },
+  { provider: 'SHOPIFY', label: 'Shopify', status: 'DISCONNECTED', mode: 'READ_ONLY' },
+  { provider: 'META_ADS', label: 'Meta Ads', status: 'DISCONNECTED', mode: 'READ_ONLY' },
+  {
+    provider: 'FACEBOOK_PAGE',
+    label: 'Facebook Page',
+    status: 'DISCONNECTED',
+    mode: 'DRAFT_ACTIONS',
+  },
+  { provider: 'INSTAGRAM', label: 'Instagram', status: 'DISCONNECTED', mode: 'DRAFT_ACTIONS' },
+];
+
+async function optionalApiFetch<T>(path: string, fallback: T) {
+  try {
+    return await apiFetch<T>(path);
+  } catch {
+    return fallback;
+  }
+}
+
 async function updateOrganization(formData: FormData) {
   'use server';
 
@@ -75,7 +97,7 @@ export default async function SettingsPage({ params }: { params: Promise<{ local
   const { locale } = await params;
   const [organization, integrations] = await Promise.all([
     apiFetch<Organization>('/api/v1/settings/organization'),
-    apiFetch<Integration[]>('/api/v1/integrations'),
+    optionalApiFetch<Integration[]>('/api/v1/integrations', FALLBACK_INTEGRATIONS),
   ]);
   const connectedCount = integrations.filter(
     (integration) => integration.status === 'CONNECTED',

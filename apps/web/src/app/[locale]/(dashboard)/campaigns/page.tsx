@@ -18,6 +18,14 @@ interface Campaign {
   objective?: string | null;
 }
 
+async function optionalApiFetch<T>(path: string, fallback: T) {
+  try {
+    return await apiFetch<T>(path);
+  } catch {
+    return fallback;
+  }
+}
+
 async function draftCampaignReview() {
   'use server';
   await apiFetch('/api/v1/marketing/meta-ads/draft-action', {
@@ -36,10 +44,21 @@ async function draftCampaignReview() {
 export default async function CampaignsPage({ params }: { params: Promise<{ locale: string }> }) {
   const { locale } = await params;
   const [summary, campaigns, integrations, settings] = await Promise.all([
-    apiFetch<MarketingSummary>('/api/v1/marketing/meta-ads/summary'),
-    apiFetch<Campaign[]>('/api/v1/marketing/meta-ads/campaigns'),
-    apiFetch<Array<{ provider: string; status: string; mode: string }>>('/api/v1/integrations'),
-    apiFetch<{ baseCurrency: string }>('/api/v1/settings/organization'),
+    optionalApiFetch<MarketingSummary>('/api/v1/marketing/meta-ads/summary', {
+      campaigns: 0,
+      draftActions: 0,
+      spend: 0,
+      clicks: 0,
+      conversions: 0,
+    }),
+    optionalApiFetch<Campaign[]>('/api/v1/marketing/meta-ads/campaigns', []),
+    optionalApiFetch<Array<{ provider: string; status: string; mode: string }>>(
+      '/api/v1/integrations',
+      [],
+    ),
+    optionalApiFetch<{ baseCurrency: string }>('/api/v1/settings/organization', {
+      baseCurrency: 'USD',
+    }),
   ]);
 
   const meta = integrations.find((integration) => integration.provider === 'META_ADS');

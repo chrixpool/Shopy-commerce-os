@@ -14,22 +14,16 @@ export function AppShell({
   locale: string;
   session: Session;
 }) {
-  const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+  const [isSidebarExpanded, setIsSidebarExpanded] = useState(false);
 
   return (
-    <div className="app-shell">
-      <Sidebar locale={locale} isOpen={isSidebarOpen} onClose={() => setIsSidebarOpen(false)} />
-      <button
-        aria-label="Close navigation"
-        className={`sidebar-scrim${isSidebarOpen ? ' sidebar-scrim-visible' : ''}`}
-        onClick={() => setIsSidebarOpen(false)}
-        type="button"
-      />
+    <div className={`app-shell${isSidebarExpanded ? ' sidebar-expanded' : ''}`}>
+      <Sidebar locale={locale} isExpanded={isSidebarExpanded} />
       <div className="app-main">
         <Topbar
           session={session}
           locale={locale}
-          onMenuClick={() => setIsSidebarOpen((value) => !value)}
+          onMenuClick={() => setIsSidebarExpanded((value) => !value)}
         />
         <main className="content-area">
           <div className="content-inner">{children}</div>

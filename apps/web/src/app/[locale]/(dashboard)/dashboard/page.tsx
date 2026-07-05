@@ -39,14 +39,35 @@ interface DraftAction {
   createdAt: string;
 }
 
+const EMPTY_SUMMARY: DashboardSummary = {
+  totalOrders: 0,
+  revenue: 0,
+  workQueues: {
+    pendingConfirmation: 0,
+    readyToPack: 0,
+    inDelivery: 0,
+    lowStockProducts: 0,
+  },
+  ordersByStatus: {},
+  suggestions: [],
+};
+
+async function optionalApiFetch<T>(path: string, fallback: T) {
+  try {
+    return await apiFetch<T>(path);
+  } catch {
+    return fallback;
+  }
+}
+
 export default async function DashboardPage({ params }: { params: Promise<{ locale: string }> }) {
   const { locale } = await params;
   const t = await getTranslations();
   const [summary, workspace, integrations, draftActions] = await Promise.all([
-    apiFetch<DashboardSummary>('/api/v1/dashboard/summary'),
-    getWorkspaceSettings(),
-    apiFetch<IntegrationStatus[]>('/api/v1/integrations'),
-    apiFetch<DraftAction[]>('/api/v1/draft-actions'),
+    optionalApiFetch<DashboardSummary>('/api/v1/dashboard/summary', EMPTY_SUMMARY),
+    getWorkspaceSettings().catch(() => ({ baseCurrency: 'USD' })),
+    optionalApiFetch<IntegrationStatus[]>('/api/v1/integrations', []),
+    optionalApiFetch<DraftAction[]>('/api/v1/draft-actions', []),
   ]);
   const connectedChannels = integrations.filter(
     (integration) => integration.status === 'CONNECTED',
