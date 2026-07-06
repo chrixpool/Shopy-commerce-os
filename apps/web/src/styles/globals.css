@@ -707,6 +707,18 @@ a {
   font-weight: 700;
 }
 
+.form-status {
+  margin: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface-soft);
+  color: var(--text-2);
+  font-size: 13px;
+  font-weight: 650;
+  line-height: 1.45;
+  padding: 10px 12px;
+}
+
 .button-block {
   width: 100%;
 }

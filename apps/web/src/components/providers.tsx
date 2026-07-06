@@ -13,7 +13,7 @@ function healthUrl() {
 export function Providers({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     const controller = new AbortController();
-    const timeout = window.setTimeout(() => controller.abort(), 5000);
+    const timeout = window.setTimeout(() => controller.abort(), 20000);
 
     fetch(healthUrl(), { signal: controller.signal, cache: 'no-store' }).catch(() => {
       // Render Free can be waking up; page-level API states handle visible failures.
