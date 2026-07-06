@@ -162,14 +162,14 @@ Run locally:
 pnpm dev
 ```
 
-## Demo Credentials
+## Owner Login
 
-| Field    | Value            |
-| -------- | ---------------- |
-| Email    | `demo@Shopy.app` |
-| Password | `Demo12345!`     |
+| Field    | Value                               |
+| -------- | ----------------------------------- |
+| Email    | `Oussemawarteni@shopy.com`          |
+| Password | Set privately in seed/local secrets |
 
-`Shopy.app` is only a demo email identifier. Do not assume domain ownership.
+Do not commit real passwords or provider secrets.
 
 ## Verification URLs
 

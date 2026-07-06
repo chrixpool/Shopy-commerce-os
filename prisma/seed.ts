@@ -159,21 +159,29 @@ async function main() {
     },
   });
 
-  const passwordHash = await bcrypt.hash('Demo12345!', 10);
+  const ownerEmail = process.env.SEED_OWNER_EMAIL ?? 'Oussemawarteni@shopy.com';
+  const ownerPassword = process.env.SEED_OWNER_PASSWORD ?? 'ChangeMe.0011**';
+  const passwordHash = await bcrypt.hash(ownerPassword, 10);
   const owner = await prisma.user.upsert({
-    where: { email: 'demo@Shopy.app' },
+    where: { email: ownerEmail },
     update: {
-      name: 'Demo Owner',
+      name: 'Oussema Warteni',
       passwordHash,
       role: 'OWNER',
       organizationId: org.id,
     },
     create: {
-      name: 'Demo Owner',
-      email: 'demo@Shopy.app',
+      name: 'Oussema Warteni',
+      email: ownerEmail,
       passwordHash,
       role: 'OWNER',
       organizationId: org.id,
+    },
+  });
+
+  await prisma.user.deleteMany({
+    where: {
+      email: { in: ['demo@Shopy.app', 'demo@shopy.app'] },
     },
   });
 
@@ -522,7 +530,7 @@ async function main() {
   }
 
   console.log(`Organization: ${org.name} (${org.slug})`);
-  console.log(`Owner: ${owner.email} / Demo12345!`);
+  console.log(`Owner: ${owner.email}`);
   console.log('Seeding complete.');
 }
 
