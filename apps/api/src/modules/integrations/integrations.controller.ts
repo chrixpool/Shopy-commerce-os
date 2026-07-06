@@ -2,13 +2,17 @@ import {
   BadRequestException,
   Body,
   Controller,
+  Delete,
   Get,
   Headers,
   Param,
   Patch,
   Post,
+  Req,
   UseGuards,
 } from '@nestjs/common';
+import type { RawBodyRequest } from '@nestjs/common';
+import type { Request } from 'express';
 import { IntegrationProvider } from '@prisma/client';
 import { CurrentUser, InternalAuthGuard, Public, type SessionUser } from '../../core/auth';
 import { ConnectIntegrationDto, SyncIntegrationDto } from './dto/connect-integration.dto';
@@ -53,9 +57,26 @@ export class IntegrationsController {
     return this.integrationsService.sync(user.organizationId, parseProvider(provider), dto);
   }
 
+  @Post('integrations/:provider/dry-run')
+  dryRun(@CurrentUser() user: SessionUser, @Param('provider') provider: string) {
+    return this.integrationsService.sync(user.organizationId, parseProvider(provider), {
+      dryRun: true,
+    });
+  }
+
   @Get('integrations/:provider/sync-runs')
   syncRuns(@CurrentUser() user: SessionUser, @Param('provider') provider: string) {
     return this.integrationsService.syncRuns(user.organizationId, parseProvider(provider));
+  }
+
+  @Post('integrations/:provider/disconnect')
+  disconnect(@CurrentUser() user: SessionUser, @Param('provider') provider: string) {
+    return this.integrationsService.disconnect(user.organizationId, parseProvider(provider));
+  }
+
+  @Delete('integrations/:provider/disconnect')
+  disconnectDelete(@CurrentUser() user: SessionUser, @Param('provider') provider: string) {
+    return this.integrationsService.disconnect(user.organizationId, parseProvider(provider));
   }
 
   @Get('marketing/meta-ads/summary')
@@ -103,8 +124,12 @@ export class IntegrationWebhooksController {
 
   @Public()
   @Post('shopify')
-  shopify(@Headers() headers: Record<string, string | undefined>, @Body() payload: unknown) {
-    return this.integrationsService.handleShopifyWebhook(headers, payload);
+  shopify(
+    @Headers() headers: Record<string, string | undefined>,
+    @Body() payload: unknown,
+    @Req() req: RawBodyRequest<Request>,
+  ) {
+    return this.integrationsService.handleShopifyWebhook(headers, payload, req.rawBody);
   }
 }
 

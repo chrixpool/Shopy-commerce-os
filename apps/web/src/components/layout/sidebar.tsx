@@ -23,6 +23,7 @@ const GROWTH_ITEMS: NavItem[] = [
   { key: 'automations', href: 'automations', icon: 'automations' },
   { key: 'campaigns', href: 'campaigns', icon: 'campaigns' },
   { key: 'inventory', href: 'inventory', icon: 'inventory' },
+  { key: 'factory', href: 'factory', icon: 'factory' },
   { key: 'finance', href: 'finance', icon: 'finance' },
 ];
 
@@ -40,6 +41,7 @@ type IconName =
   | 'automations'
   | 'campaigns'
   | 'inventory'
+  | 'factory'
   | 'finance'
   | 'team'
   | 'settings';
@@ -176,6 +178,15 @@ function NavIcon({ name }: { name: IconName }) {
         <path d="M5 6h14v4H5z" />
         <path d="M7 10v9h10v-9" />
         <path d="M10 14h4" />
+      </>
+    ),
+    factory: (
+      <>
+        <path d="M4 20V9l5 3V9l5 3V7h6v13z" />
+        <path d="M7 17h2" />
+        <path d="M12 17h2" />
+        <path d="M17 17h1" />
+        <path d="M16 7V4h4v3" />
       </>
     ),
     finance: (

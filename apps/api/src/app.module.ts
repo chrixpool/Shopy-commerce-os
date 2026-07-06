@@ -13,6 +13,7 @@ import { InventoryModule } from './modules/inventory/inventory.module';
 import { SettingsModule } from './modules/settings/settings.module';
 import { IntegrationsModule } from './modules/integrations/integrations.module';
 import { AutomationsModule } from './modules/automations/automations.module';
+import { FactoryModule } from './modules/factory/factory.module';
 
 @Module({
   imports: [
@@ -37,6 +38,7 @@ import { AutomationsModule } from './modules/automations/automations.module';
     SettingsModule,
     IntegrationsModule,
     AutomationsModule,
+    FactoryModule,
     // Phase 2
     ShopifyModule,
   ],

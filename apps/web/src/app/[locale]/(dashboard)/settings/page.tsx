@@ -20,6 +20,7 @@ interface Integration {
   capabilities?: Record<string, boolean>;
   config?: Record<string, unknown>;
   lastSyncAt?: string | null;
+  errorMessage?: string | null;
 }
 
 const FALLBACK_INTEGRATIONS: Integration[] = [
@@ -72,6 +73,7 @@ async function connectIntegration(formData: FormData) {
       pageId: String(formData.get('pageId') ?? ''),
       instagramBusinessAccountId: String(formData.get('instagramBusinessAccountId') ?? ''),
       accessToken: String(formData.get('accessToken') ?? ''),
+      apiVersion: String(formData.get('apiVersion') ?? ''),
       mode: String(formData.get('mode') ?? 'READ_ONLY'),
     }),
   });
@@ -83,14 +85,40 @@ async function syncIntegration(formData: FormData) {
   'use server';
 
   const provider = String(formData.get('provider') ?? '');
-  await apiFetch(`/api/v1/integrations/${provider.toLowerCase().replaceAll('_', '-')}/sync`, {
-    method: 'POST',
-    body: JSON.stringify({ dryRun: formData.get('dryRun') === 'true' }),
-  });
+  const dryRun = formData.get('dryRun') === 'true';
+  await apiFetch(
+    `/api/v1/integrations/${provider.toLowerCase().replaceAll('_', '-')}${dryRun ? '/dry-run' : '/sync'}`,
+    {
+      method: 'POST',
+      body: JSON.stringify({ dryRun }),
+    },
+  );
 
   revalidatePath('/[locale]/settings', 'page');
   revalidatePath('/[locale]/campaigns', 'page');
   revalidatePath('/[locale]/dashboard', 'page');
+}
+
+async function testIntegration(formData: FormData) {
+  'use server';
+
+  const provider = String(formData.get('provider') ?? '');
+  await apiFetch(`/api/v1/integrations/${provider.toLowerCase().replaceAll('_', '-')}/test`, {
+    method: 'POST',
+  });
+
+  revalidatePath('/[locale]/settings', 'page');
+}
+
+async function disconnectIntegration(formData: FormData) {
+  'use server';
+
+  const provider = String(formData.get('provider') ?? '');
+  await apiFetch(`/api/v1/integrations/${provider.toLowerCase().replaceAll('_', '-')}/disconnect`, {
+    method: 'POST',
+  });
+
+  revalidatePath('/[locale]/settings', 'page');
 }
 
 export default async function SettingsPage({ params }: { params: Promise<{ locale: string }> }) {
@@ -269,14 +297,30 @@ export default async function SettingsPage({ params }: { params: Promise<{ local
                     <input name="provider" type="hidden" value={integration.provider} />
                     <input name="mode" type="hidden" value="READ_ONLY" />
                     {integration.provider === 'SHOPIFY' ? (
-                      <label className="form-field" style={{ gridColumn: '1 / -1' }}>
-                        <span>Shop domain</span>
-                        <input
-                          className="field"
-                          name="shopDomain"
-                          placeholder="your-store.myshopify.com"
-                        />
-                      </label>
+                      <>
+                        <label className="form-field">
+                          <span>Shop domain</span>
+                          <input
+                            className="field"
+                            name="shopDomain"
+                            placeholder="your-store.myshopify.com"
+                            defaultValue={String(integration.config?.shopDomain ?? '')}
+                          />
+                        </label>
+                        <label className="form-field">
+                          <span>API version</span>
+                          <input
+                            className="field"
+                            name="apiVersion"
+                            placeholder="2026-01"
+                            defaultValue={String(integration.config?.apiVersion ?? '2026-01')}
+                          />
+                        </label>
+                        <p className="field-help" style={{ gridColumn: '1 / -1' }}>
+                          Required read-only scopes: read_orders, read_products, read_customers,
+                          read_inventory, read_locations.
+                        </p>
+                      </>
                     ) : null}
                     {integration.provider === 'META_ADS' ? (
                       <label className="form-field" style={{ gridColumn: '1 / -1' }}>
@@ -317,6 +361,14 @@ export default async function SettingsPage({ params }: { params: Promise<{ local
                   </form>
                 ) : null}
                 <div className="button-row">
+                  {isExternal ? (
+                    <form action={testIntegration}>
+                      <input name="provider" type="hidden" value={integration.provider} />
+                      <button className="button button-secondary" type="submit">
+                        Test
+                      </button>
+                    </form>
+                  ) : null}
                   <form action={syncIntegration}>
                     <input name="provider" type="hidden" value={integration.provider} />
                     <input name="dryRun" type="hidden" value="true" />
@@ -331,7 +383,18 @@ export default async function SettingsPage({ params }: { params: Promise<{ local
                       Sync now
                     </button>
                   </form>
+                  {integration.provider === 'SHOPIFY' ? (
+                    <form action={disconnectIntegration}>
+                      <input name="provider" type="hidden" value={integration.provider} />
+                      <button className="button button-secondary" type="submit">
+                        Disconnect
+                      </button>
+                    </form>
+                  ) : null}
                 </div>
+                {integration.errorMessage ? (
+                  <p className="field-help">Status note: {integration.errorMessage}</p>
+                ) : null}
                 <p className="field-help">
                   Last sync:{' '}
                   {integration.lastSyncAt

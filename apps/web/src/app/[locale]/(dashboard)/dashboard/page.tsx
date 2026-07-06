@@ -39,6 +39,12 @@ interface DraftAction {
   createdAt: string;
 }
 
+interface CostingSummary {
+  grossMargin: number;
+  grossMarginPercent: number;
+  productsMissingCost: number;
+}
+
 const EMPTY_SUMMARY: DashboardSummary = {
   totalOrders: 0,
   revenue: 0,
@@ -63,11 +69,16 @@ async function optionalApiFetch<T>(path: string, fallback: T) {
 export default async function DashboardPage({ params }: { params: Promise<{ locale: string }> }) {
   const { locale } = await params;
   const t = await getTranslations();
-  const [summary, workspace, integrations, draftActions] = await Promise.all([
+  const [summary, workspace, integrations, draftActions, costing] = await Promise.all([
     optionalApiFetch<DashboardSummary>('/api/v1/dashboard/summary', EMPTY_SUMMARY),
     getWorkspaceSettings().catch(() => ({ baseCurrency: 'USD' })),
     optionalApiFetch<IntegrationStatus[]>('/api/v1/integrations', []),
     optionalApiFetch<DraftAction[]>('/api/v1/draft-actions', []),
+    optionalApiFetch<CostingSummary>('/api/v1/costing/summary', {
+      grossMargin: 0,
+      grossMarginPercent: 0,
+      productsMissingCost: 0,
+    }),
   ]);
   const connectedChannels = integrations.filter(
     (integration) => integration.status === 'CONNECTED',
@@ -177,6 +188,13 @@ export default async function DashboardPage({ params }: { params: Promise<{ loca
           badge={pendingDrafts.length ? 'Review' : 'Clear'}
           badgeTone={pendingDrafts.length ? 'warning' : 'success'}
         />
+        <MetricCard
+          label="Gross margin"
+          value={formatMoney(costing.grossMargin, workspace.baseCurrency, locale)}
+          help={`${Math.round(costing.grossMarginPercent * 1000) / 10}% after product cost snapshots.`}
+          badge={costing.productsMissingCost ? 'Costs needed' : 'Costed'}
+          badgeTone={costing.productsMissingCost ? 'warning' : 'success'}
+        />
       </section>
 
       <section className="command-grid">
@@ -229,6 +247,10 @@ export default async function DashboardPage({ params }: { params: Promise<{ loca
             <Link className="quick-action" href={`/${locale}/inventory`} prefetch>
               <span>Stock control</span>
               <small>Check low inventory</small>
+            </Link>
+            <Link className="quick-action" href={`/${locale}/factory`} prefetch>
+              <span>Factory costs</span>
+              <small>Calculate margins</small>
             </Link>
             <Link className="quick-action" href={`/${locale}/automations`} prefetch>
               <span>Automation rules</span>

@@ -1,7 +1,7 @@
 import Link from 'next/link';
 import { revalidatePath } from 'next/cache';
 import { getTranslations } from 'next-intl/server';
-import { EmptyState, MetricCard, PageHeader } from '@/components/ui/page';
+import { EmptyState, MetricCard, PageHeader, StatusBadge } from '@/components/ui/page';
 import { apiFetch, getWorkspaceSettings } from '@/lib/api';
 import { formatMoney } from '@/lib/currency';
 
@@ -18,12 +18,17 @@ interface OrderRecord {
   customerName: string;
   customerPhone: string;
   status: string;
+  source: string;
   totalAmount: string | number;
   createdAt: string;
   customer?: {
     city?: string | null;
   } | null;
   items: OrderItem[];
+  costSnapshot?: {
+    grossMargin: string | number;
+    grossMarginPercent: string | number;
+  } | null;
 }
 
 interface OrdersResponse {
@@ -97,6 +102,8 @@ export default async function OrdersPage({
     acc[order.status] = (acc[order.status] ?? 0) + 1;
     return acc;
   }, {});
+  const shopifyOrders = orders.data.filter((order) => order.source === 'shopify').length;
+  const missingCosts = orders.data.filter((order) => !order.costSnapshot).length;
 
   return (
     <div className="page-stack">
@@ -141,6 +148,20 @@ export default async function OrdersPage({
           help="Returned orders needing review."
           badge={(counts.RETURNED ?? 0) > 0 ? 'Review' : 'None'}
           badgeTone={(counts.RETURNED ?? 0) > 0 ? 'warning' : 'success'}
+        />
+        <MetricCard
+          label="Shopify imports"
+          value={String(shopifyOrders)}
+          help="Orders imported from the read-only Shopify connector."
+          badge={shopifyOrders ? 'Source' : 'None'}
+          badgeTone={shopifyOrders ? 'info' : 'muted'}
+        />
+        <MetricCard
+          label="Cost missing"
+          value={String(missingCosts)}
+          help="Orders without a margin snapshot yet."
+          badge={missingCosts ? 'Recalc' : 'Ready'}
+          badgeTone={missingCosts ? 'warning' : 'success'}
         />
       </section>
 
@@ -210,7 +231,9 @@ export default async function OrdersPage({
                 <th>Customer</th>
                 <th>City</th>
                 <th>Items</th>
+                <th>Source</th>
                 <th>Total</th>
+                <th>Margin</th>
                 <th>Status</th>
                 <th>Update</th>
               </tr>
@@ -225,9 +248,34 @@ export default async function OrdersPage({
                   </td>
                   <td>{order.customer?.city ?? '-'}</td>
                   <td>{order.items.map((item) => `${item.quantity}x ${item.name}`).join(', ')}</td>
+                  <td>
+                    <StatusBadge tone={order.source === 'shopify' ? 'info' : 'muted'}>
+                      {order.source === 'shopify' ? 'Shopify' : order.source || 'Manual'}
+                    </StatusBadge>
+                  </td>
                   <td>{formatMoney(order.totalAmount, workspace.baseCurrency, locale)}</td>
                   <td>
-                    <span className="badge badge-muted">{order.status}</span>
+                    {order.costSnapshot ? (
+                      <div>
+                        <div>
+                          {formatMoney(
+                            order.costSnapshot.grossMargin,
+                            workspace.baseCurrency,
+                            locale,
+                          )}
+                        </div>
+                        <StatusBadge
+                          tone={Number(order.costSnapshot.grossMargin) >= 0 ? 'success' : 'warning'}
+                        >
+                          {Math.round(Number(order.costSnapshot.grossMarginPercent) * 1000) / 10}%
+                        </StatusBadge>
+                      </div>
+                    ) : (
+                      <StatusBadge tone="warning">Cost missing</StatusBadge>
+                    )}
+                  </td>
+                  <td>
+                    <StatusBadge tone="muted">{order.status}</StatusBadge>
                   </td>
                   <td>
                     <form action={updateStatus} className="inline-form">

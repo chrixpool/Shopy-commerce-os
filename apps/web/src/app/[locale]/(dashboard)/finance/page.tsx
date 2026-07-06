@@ -30,16 +30,41 @@ interface OrdersResponse {
   total: number;
 }
 
+interface CostingSummary {
+  estimatedCogs: number;
+  grossMargin: number;
+  grossMarginPercent: number;
+  expenses: number;
+  snapshots: number;
+  productsMissingCost: number;
+}
+
 function amount(value: string | number) {
   return typeof value === 'number' ? value : Number(value);
 }
 
+async function optionalApiFetch<T>(path: string, fallback: T) {
+  try {
+    return await apiFetch<T>(path);
+  } catch {
+    return fallback;
+  }
+}
+
 export default async function FinancePage({ params }: { params: Promise<{ locale: string }> }) {
   const { locale } = await params;
-  const [summary, orders, workspace] = await Promise.all([
+  const [summary, orders, workspace, costing] = await Promise.all([
     apiFetch<DashboardSummary>('/api/v1/dashboard/summary'),
     apiFetch<OrdersResponse>('/api/v1/orders?limit=100'),
     getWorkspaceSettings(),
+    optionalApiFetch<CostingSummary>('/api/v1/costing/summary', {
+      estimatedCogs: 0,
+      grossMargin: 0,
+      grossMarginPercent: 0,
+      expenses: 0,
+      snapshots: 0,
+      productsMissingCost: 0,
+    }),
   ]);
 
   const delivered = orders.data.filter((order) => order.status === 'DELIVERED');
@@ -88,6 +113,20 @@ export default async function FinancePage({ params }: { params: Promise<{ locale
           help="Pending, confirmed, and shipped orders still in motion."
           badge="Open"
           badgeTone="warning"
+        />
+        <MetricCard
+          label="Estimated COGS"
+          value={formatMoney(costing.estimatedCogs, workspace.baseCurrency, locale)}
+          help={`${costing.snapshots} order margin snapshot(s) calculated.`}
+          badge="Costing"
+          badgeTone="info"
+        />
+        <MetricCard
+          label="Gross margin"
+          value={formatMoney(costing.grossMargin, workspace.baseCurrency, locale)}
+          help={`${Math.round(costing.grossMarginPercent * 1000) / 10}% estimated gross margin.`}
+          badge={costing.grossMargin >= 0 ? 'Positive' : 'Review'}
+          badgeTone={costing.grossMargin >= 0 ? 'success' : 'warning'}
         />
         <MetricCard
           label="Return exposure"

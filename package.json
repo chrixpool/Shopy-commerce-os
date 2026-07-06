@@ -14,6 +14,10 @@
     "typecheck:local": "pnpm -r --if-present typecheck",
     "typecheck:cloud": "turbo typecheck",
     "smoke:local": "node scripts/smoke-local.mjs",
+    "shopify:check": "node scripts/shopify/check-shopify-env.mjs",
+    "shopify:test": "node scripts/shopify/test-shopify-connection.mjs",
+    "shopify:dry-run": "node scripts/shopify/dry-run-shopify-sync.mjs",
+    "shopify:webhook:test": "node scripts/shopify/verify-shopify-webhook-sample.mjs",
     "format": "prettier --write \"**/*.{ts,tsx,js,jsx,json,css,md}\"",
     "format:check": "prettier --check \"**/*.{ts,tsx,js,jsx,json,css,md}\"",
     "prepare": "husky"

@@ -197,6 +197,11 @@ model Organization {
   automationRuns AutomationRun[]
   externalEvents ExternalEvent[]
   draftActions DraftAction[]
+  factories Factory[]
+  costComponents CostComponent[]
+  productCosts ProductCost[]
+  operatingExpenses OperatingExpense[]
+  orderCostSnapshots OrderCostSnapshot[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -243,6 +248,8 @@ model Product {
   lowStockThreshold Int @default(5)
 
   orderItems   OrderItem[]
+  productCosts ProductCost[]
+  operatingExpenses OperatingExpense[]
   inventoryRecords InventoryRecord[]
 
   createdAt DateTime @default(now())
@@ -324,6 +331,7 @@ model Order {
   confirmationTask   ConfirmationTask?
   fulfillmentTask    FulfillmentTask?
   parcel             Parcel?
+  costSnapshot       OrderCostSnapshot?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -600,4 +608,116 @@ model DraftAction {
 
   @@index([organizationId, status])
   @@index([organizationId, provider])
+}
+
+// ─── FACTORY & COSTING ───────────────────────────────────────────────────────
+
+model Factory {
+  id             String       @id @default(cuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  name        String
+  contactName String?
+  phone       String?
+  address     String?
+  notes       String?
+  active      Boolean @default(true)
+
+  productCosts ProductCost[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([organizationId, active])
+}
+
+model CostComponent {
+  id             String       @id @default(cuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  name            String
+  category        String
+  defaultUnitCost Decimal @default(0) @db.Decimal(10, 2)
+  currency        String
+  active          Boolean @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([organizationId, active])
+}
+
+model ProductCost {
+  id             String       @id @default(cuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  productId String
+  product   Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  factoryId String?
+  factory   Factory? @relation(fields: [factoryId], references: [id], onDelete: SetNull)
+
+  sewingCost        Decimal @default(0) @db.Decimal(10, 2)
+  fabricCost        Decimal @default(0) @db.Decimal(10, 2)
+  accessoryCost     Decimal @default(0) @db.Decimal(10, 2)
+  packagingCost     Decimal @default(0) @db.Decimal(10, 2)
+  otherVariableCost Decimal @default(0) @db.Decimal(10, 2)
+  overheadAllocation Decimal @default(0) @db.Decimal(10, 2)
+  totalUnitCost     Decimal @default(0) @db.Decimal(10, 2)
+  currency          String
+  notes             String?
+  effectiveFrom     DateTime @default(now())
+  active            Boolean @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([organizationId, active])
+  @@index([productId])
+}
+
+model OperatingExpense {
+  id             String       @id @default(cuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  name               String
+  category           String
+  amount             Decimal @db.Decimal(10, 2)
+  currency           String
+  recurrence         String @default("ONE_TIME")
+  appliesToProductId String?
+  appliesToProduct   Product? @relation(fields: [appliesToProductId], references: [id], onDelete: SetNull)
+  active             Boolean @default(true)
+  notes              String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([organizationId, active])
+}
+
+model OrderCostSnapshot {
+  id             String       @id @default(cuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  orderId String @unique
+  order   Order  @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  productCostTotal        Decimal @default(0) @db.Decimal(10, 2)
+  packagingCostTotal      Decimal @default(0) @db.Decimal(10, 2)
+  shippingSupplyCostTotal Decimal @default(0) @db.Decimal(10, 2)
+  otherCostTotal          Decimal @default(0) @db.Decimal(10, 2)
+  totalCost               Decimal @default(0) @db.Decimal(10, 2)
+  revenue                 Decimal @default(0) @db.Decimal(10, 2)
+  grossMargin             Decimal @default(0) @db.Decimal(10, 2)
+  grossMarginPercent      Decimal @default(0) @db.Decimal(10, 4)
+  currency                String
+  calculatedAt            DateTime @default(now())
+
+  @@index([organizationId, calculatedAt])
 }

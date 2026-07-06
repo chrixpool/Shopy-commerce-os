@@ -11,6 +11,8 @@ Shopy is a zero-spend local/online MVP for commerce operations: auth, dashboard,
 - Manual order creation and CSV order import.
 - Automation rules with dry-run execution, run logs, and an approval queue for draft actions.
 - Optional integration foundation for Shopify, Meta Ads, Facebook Pages, and Instagram.
+- Read-only Shopify starter connector with test, dry-run sync, import sync, and webhook signature verification.
+- Factory & Costs module for factories, product unit costs, operating expenses, and order margin snapshots.
 - Confirmation queue with manual call statuses plus `tel:` and `wa.me` click links.
 - Fulfillment queue with packing status and stock decrement on packed orders.
 - Manual delivery parcel events/status updates.
@@ -50,6 +52,82 @@ For local testing, add only the provider values you actually need:
 - `INSTAGRAM_BUSINESS_ACCOUNT_ID`, `INSTAGRAM_ACCESS_TOKEN`: optional Instagram read-only reporting.
 
 Provider permissions and app review may be required by Shopify or Meta before real live data is available. The app still works without those approvals.
+
+### Shopify Starter Setup
+
+The current Shopify path uses an existing Shopify app/store and a manual Admin API token. It is read-only/import-first and does not write back to Shopify.
+
+Required read-only scopes:
+
+- `read_orders`
+- `read_products`
+- `read_customers`
+- `read_inventory`
+- `read_locations`
+
+Local secret file:
+
+```powershell
+Copy-Item .secrets\shopify.env.example .secrets\shopify.env
+```
+
+Fill only local values in `.secrets/shopify.env`:
+
+```env
+SHOPIFY_SHOP_DOMAIN=shorty-42095.myshopify.com
+SHOPIFY_ADMIN_ACCESS_TOKEN=
+SHOPIFY_WEBHOOK_SECRET=
+INTEGRATION_SECRET_KEY=
+```
+
+Do not commit `.secrets/shopify.env`. The Admin API access token is different from the Shopify app client secret.
+
+Validation scripts:
+
+```powershell
+pnpm shopify:check
+pnpm shopify:test
+pnpm shopify:dry-run
+pnpm shopify:webhook:test
+```
+
+Webhook receiver:
+
+```text
+https://<api-domain>/api/v1/webhooks/shopify
+```
+
+Useful topics for this phase:
+
+- `orders/create`
+- `orders/updated`
+- `orders/cancelled`
+- `products/update`
+- `inventory_levels/update`
+
+Render env names for Shopify, values not committed:
+
+- `INTEGRATION_SECRET_KEY`
+- `SHOPIFY_SHOP_DOMAIN`
+- `SHOPIFY_ADMIN_ACCESS_TOKEN`
+- `SHOPIFY_WEBHOOK_SECRET`
+- `SHOPIFY_API_VERSION`
+- `SHOPIFY_ALLOWED_SCOPES`
+- `SHOPIFY_DEFAULT_SYNC_DAYS`
+
+If the Shopify app secret has been shown in a screenshot or chat, rotate it before relying on it for production webhook verification.
+
+### Factory And Costing
+
+Use `/en/factory` to manage:
+
+- factories and supplier contacts
+- reusable cost components
+- product unit costs
+- operating expenses
+- order margin recalculation
+
+Costing uses the workspace currency and does not perform FX conversion. Missing product costs are shown as warnings instead of silently assuming zero.
 
 ## Windows 32-bit Local Notes
 
@@ -102,6 +180,7 @@ pnpm dev
 - Fulfillment: http://localhost:3000/en/fulfillment
 - Delivery: http://localhost:3000/en/delivery
 - Inventory: http://localhost:3000/en/inventory
+- Factory & Costs: http://localhost:3000/en/factory
 - Team: http://localhost:3000/en/team
 - Settings: http://localhost:3000/en/settings
 - API health: http://localhost:4000/api/v1/health

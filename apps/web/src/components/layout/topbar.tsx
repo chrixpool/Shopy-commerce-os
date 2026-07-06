@@ -20,6 +20,7 @@ const TITLES: Record<string, string> = {
   automations: 'automations',
   campaigns: 'campaigns',
   inventory: 'inventory',
+  factory: 'factory',
   finance: 'finance',
   team: 'team',
   settings: 'settings',

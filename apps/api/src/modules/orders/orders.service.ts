@@ -42,6 +42,7 @@ export class OrdersService {
         include: {
           customer: true,
           items: true,
+          costSnapshot: true,
         },
         orderBy: { createdAt: 'desc' },
         skip: (page - 1) * limit,
@@ -69,6 +70,7 @@ export class OrdersService {
         confirmationTask: true,
         fulfillmentTask: true,
         parcel: { include: { events: { orderBy: { timestamp: 'desc' } } } },
+        costSnapshot: true,
       },
     });
 

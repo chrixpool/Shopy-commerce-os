@@ -31,9 +31,12 @@ export class ShopifyAdapter extends MockAdapter {
   async testConnection(connection?: AdapterConnection | null) {
     const shopDomain = String(connection?.config?.shopDomain ?? '');
     if (!shopDomain) return { ok: false, message: 'Shop domain is required.' };
+    if (!connection?.credentials?.accessToken) {
+      return { ok: false, message: 'Shopify Admin API access token is required.' };
+    }
     return {
       ok: true,
-      message: 'Shopify connection metadata is valid. Token is stored encrypted when provided.',
+      message: 'Shopify connection is configured for read-only Admin API access.',
     };
   }
 
@@ -45,7 +48,9 @@ export class ShopifyAdapter extends MockAdapter {
         ? 'Shopify dry-run estimated import scope. No store data was changed.'
         : 'Shopify sync completed in safe foundation mode. No Shopify write was made.',
       counts: { orders: 0, customers: 0, products: 0, inventoryRecords: 0 },
-      warnings: ['Live Shopify read import can be enabled with a valid Admin API token.'],
+      warnings: connection.credentials?.accessToken
+        ? []
+        : ['Live Shopify read import requires a valid Admin API token.'],
       records: { shopDomain: connection.config.shopDomain ?? null },
     };
   }
