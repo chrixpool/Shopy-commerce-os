@@ -11,7 +11,7 @@ export class InternalAuthGuard implements CanActivate {
       user?: SessionUser;
     }>();
 
-    const expectedSecret = process.env.API_INTERNAL_SECRET ?? 'shopy-internal-secret';
+    const expectedSecret = process.env.API_INTERNAL_SECRET || 'shopy-internal-secret';
     const providedSecret = request.headers['x-internal-secret'];
 
     if (providedSecret !== expectedSecret) {

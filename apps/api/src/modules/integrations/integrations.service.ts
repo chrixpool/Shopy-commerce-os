@@ -701,7 +701,7 @@ async function shopifyFetch<T>(
   pathname: string,
 ): Promise<T> {
   const shopDomain = normalizeShopDomain(String(config.shopDomain ?? ''));
-  const apiVersion = String(config.apiVersion ?? process.env.SHOPIFY_API_VERSION ?? '2026-01');
+  const apiVersion = String(config.apiVersion || process.env.SHOPIFY_API_VERSION || '2026-01');
   const response = await fetch(`https://${shopDomain}/admin/api/${apiVersion}${pathname}`, {
     headers: {
       Accept: 'application/json',

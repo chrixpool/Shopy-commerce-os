@@ -5,7 +5,15 @@ import { useRouter } from 'next/navigation';
 import { signIn } from 'next-auth/react';
 import { useState, type FormEvent } from 'react';
 
-const PUBLIC_API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:4000';
+const PUBLIC_API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000';
+
+function apiUrl(path: string) {
+  const base = PUBLIC_API_URL.replace(/\/$/, '');
+  if (base.endsWith('/api/v1') && path.startsWith('/api/v1')) {
+    return `${base}${path.slice('/api/v1'.length)}`;
+  }
+  return `${base}${path}`;
+}
 
 export function SignUpForm({ locale }: { locale: string }) {
   const router = useRouter();
@@ -34,7 +42,7 @@ export function SignUpForm({ locale }: { locale: string }) {
       organizationName: String(formData.get('organizationName') ?? ''),
     };
 
-    const response = await fetch(`${PUBLIC_API_URL}/api/v1/auth/register`, {
+    const response = await fetch(apiUrl('/api/v1/auth/register'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),

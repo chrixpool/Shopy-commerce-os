@@ -22,8 +22,8 @@ declare module 'next-auth' {
   }
 }
 
-const API_URL = process.env.API_URL ?? process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:4000';
-const AUTH_SECRET = process.env.AUTH_SECRET ?? 'shopy-dev-secret-change-in-production-32chars';
+const API_URL = process.env.API_URL || process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000';
+const AUTH_SECRET = process.env.AUTH_SECRET || 'shopy-dev-secret-change-in-production-32chars';
 
 function apiUrl(path: string) {
   const base = API_URL.replace(/\/$/, '');

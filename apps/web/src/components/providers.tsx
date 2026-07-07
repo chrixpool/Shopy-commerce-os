@@ -3,7 +3,7 @@
 import { SessionProvider } from 'next-auth/react';
 import { useEffect } from 'react';
 
-const apiBase = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:4000';
+const apiBase = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000';
 
 function healthUrl() {
   const base = apiBase.replace(/\/$/, '');

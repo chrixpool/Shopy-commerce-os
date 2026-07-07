@@ -70,10 +70,6 @@ export class TeamService {
       },
     });
 
-    // In Phase 8 we send an actual email. For now log it.
-    console.log(`📧 Invitation created for ${dto.email}: token=${invitation.token}`);
-    console.log(`   Sign up at: ${process.env.AUTH_URL}/en/sign-up?token=${invitation.token}`);
-
     return {
       id: invitation.id,
       email: invitation.email,

@@ -13,11 +13,11 @@ if (fs.existsSync(envPath)) {
   }
 }
 
-const apiUrl = process.env.API_URL ?? 'http://localhost:4000';
-const webUrl = process.env.AUTH_URL ?? 'http://localhost:3000';
-const internalSecret = process.env.API_INTERNAL_SECRET ?? 'shopy-internal-secret';
-const email = process.env.SMOKE_EMAIL ?? 'demo@Shopy.app';
-const password = process.env.SMOKE_PASSWORD ?? 'Demo12345!';
+const apiUrl = process.env.API_URL || 'http://localhost:4000';
+const webUrl = process.env.AUTH_URL || 'http://localhost:3000';
+const internalSecret = process.env.API_INTERNAL_SECRET || 'shopy-internal-secret';
+const email = process.env.SMOKE_EMAIL || process.env.SEED_OWNER_EMAIL || 'Oussemawarteni@shopy.com';
+const password = process.env.SMOKE_PASSWORD || process.env.SEED_OWNER_PASSWORD || 'ChangeMe.0011**';
 
 async function request(url, init = {}) {
   const response = await fetch(url, init);

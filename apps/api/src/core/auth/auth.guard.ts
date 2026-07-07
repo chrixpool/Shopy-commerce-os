@@ -36,7 +36,7 @@ export class AuthGuard implements CanActivate {
     }
 
     const token = authHeader.slice(7);
-    const secret = new TextEncoder().encode(process.env.AUTH_SECRET ?? 'dev-secret');
+    const secret = new TextEncoder().encode(process.env.AUTH_SECRET || 'dev-secret');
 
     try {
       const { payload } = await jwtVerify(token, secret);

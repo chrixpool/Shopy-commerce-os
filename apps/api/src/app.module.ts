@@ -1,6 +1,5 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
-import { BullModule } from '@nestjs/bullmq';
 import { PrismaModule } from './core/prisma/prisma.module';
 import { HealthModule } from './core/health/health.module';
 import { AuthModule } from './modules/auth/auth.module';
@@ -20,11 +19,6 @@ import { FactoryModule } from './modules/factory/factory.module';
     ConfigModule.forRoot({
       isGlobal: true,
       envFilePath: '../../.env',
-    }),
-    BullModule.forRoot({
-      connection: {
-        url: process.env.REDIS_URL ?? 'redis://localhost:6379',
-      },
     }),
     PrismaModule,
     HealthModule,
