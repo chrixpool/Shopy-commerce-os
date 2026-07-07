@@ -1,8 +1,8 @@
 import { auth } from './auth';
 import { normalizeCurrencyCode, type WorkspaceSettings } from './currency';
 
-const API_URL = process.env.API_URL ?? process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:4000';
-const API_INTERNAL_SECRET = process.env.API_INTERNAL_SECRET ?? 'shopy-internal-secret';
+const API_URL = process.env.API_URL || process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000';
+const API_INTERNAL_SECRET = process.env.API_INTERNAL_SECRET || 'shopy-internal-secret';
 
 function apiUrl(path: string) {
   const base = API_URL.replace(/\/$/, '');
