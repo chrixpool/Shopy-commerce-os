@@ -1,5 +1,6 @@
 {
   "framework": "nextjs",
   "installCommand": "pnpm install --frozen-lockfile --prod=false",
-  "buildCommand": "pnpm --filter @shopy/shared build && pnpm --filter @shopy/web build"
+  "buildCommand": "pnpm --filter @shopy/shared build && pnpm --filter @shopy/web build && node scripts/vercel-copy-next-output.mjs",
+  "outputDirectory": ".next"
 }
