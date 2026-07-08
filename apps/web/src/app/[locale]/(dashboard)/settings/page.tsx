@@ -23,6 +23,17 @@ interface Integration {
   errorMessage?: string | null;
 }
 
+interface SyncRun {
+  id: string;
+  status: string;
+  dryRun?: boolean;
+  startedAt: string;
+  finishedAt?: string | null;
+  inputSnapshot?: Record<string, unknown> | null;
+  outputSnapshot?: Record<string, unknown> | null;
+  errorMessage?: string | null;
+}
+
 const FALLBACK_INTEGRATIONS: Integration[] = [
   { provider: 'CSV', label: 'CSV import', status: 'CONNECTED', mode: 'READ_ONLY' },
   { provider: 'MANUAL', label: 'Manual workflows', status: 'CONNECTED', mode: 'APPROVAL_REQUIRED' },
@@ -127,9 +138,10 @@ async function disconnectIntegration(formData: FormData) {
 
 export default async function SettingsPage({ params }: { params: Promise<{ locale: string }> }) {
   const { locale } = await params;
-  const [organization, integrations] = await Promise.all([
+  const [organization, integrations, shopifySyncRuns] = await Promise.all([
     apiFetch<Organization>('/api/v1/settings/organization'),
     optionalApiFetch<Integration[]>('/api/v1/integrations', FALLBACK_INTEGRATIONS),
+    optionalApiFetch<SyncRun[]>('/api/v1/integrations/shopify/sync-runs', []),
   ]);
   const connectedCount = integrations.filter(
     (integration) => integration.status === 'CONNECTED',
@@ -297,7 +309,7 @@ export default async function SettingsPage({ params }: { params: Promise<{ local
                 </div>
                 <p className="section-description">
                   {integration.provider === 'SHOPIFY'
-                    ? 'Imports orders, products, customers, and inventory. Store writes are disabled in this phase.'
+                    ? 'Shopy imports Shopify data in read-only mode. It does not modify your store.'
                     : integration.provider === 'META_ADS'
                       ? 'Reads campaign performance and creates draft recommendations. Budgets are never changed.'
                       : integration.provider === 'FACEBOOK_PAGE'
@@ -457,7 +469,10 @@ export default async function SettingsPage({ params }: { params: Promise<{ local
                   ) : null}
                 </div>
                 {integration.errorMessage ? (
-                  <p className="field-help">Status note: {integration.errorMessage}</p>
+                  <p className="field-help">
+                    Connection failed. Check store domain, scopes, or credentials. Provider note:{' '}
+                    {integration.errorMessage}
+                  </p>
                 ) : null}
                 {integration.provider === 'SHOPIFY' ? (
                   <div className="field-help">
@@ -489,6 +504,52 @@ export default async function SettingsPage({ params }: { params: Promise<{ local
                       }).format(new Date(integration.lastSyncAt))
                     : 'Not synced yet'}
                 </p>
+                {integration.provider === 'SHOPIFY' ? (
+                  <div className="sync-history" aria-label="Shopify sync history">
+                    <div className="queue-card-header">
+                      <div>
+                        <p className="queue-title">Sync history</p>
+                        <p className="queue-meta">Latest safe import activity</p>
+                      </div>
+                    </div>
+                    {shopifySyncRuns.length ? (
+                      shopifySyncRuns.slice(0, 3).map((run) => {
+                        const totals = run.outputSnapshot?.totals as
+                          Record<string, unknown> | undefined;
+                        return (
+                          <div className="sync-history-row" key={run.id}>
+                            <div>
+                              <p className="sync-history-title">
+                                {run.dryRun ? 'Dry-run' : 'Sync'} ·{' '}
+                                {run.status.replaceAll('_', ' ').toLowerCase()}
+                              </p>
+                              <p className="sync-history-meta">
+                                {new Intl.DateTimeFormat(locale, {
+                                  dateStyle: 'medium',
+                                  timeStyle: 'short',
+                                }).format(new Date(run.startedAt))}
+                              </p>
+                            </div>
+                            {totals ? (
+                              <StatusBadge tone="info">
+                                {Object.entries(totals)
+                                  .slice(0, 2)
+                                  .map(([key, value]) => `${key}: ${String(value)}`)
+                                  .join(' · ')}
+                              </StatusBadge>
+                            ) : (
+                              <StatusBadge tone="muted">Recorded</StatusBadge>
+                            )}
+                          </div>
+                        );
+                      })
+                    ) : (
+                      <p className="field-help">
+                        No sync history yet. Run a dry-run first to preview import counts.
+                      </p>
+                    )}
+                  </div>
+                ) : null}
               </div>
             );
           })}

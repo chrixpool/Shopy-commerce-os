@@ -26,6 +26,21 @@ const TITLES: Record<string, string> = {
   settings: 'settings',
 };
 
+const SUBTITLES: Record<string, string> = {
+  dashboard: 'Command center for today’s commerce work.',
+  orders: 'Create, import, and move orders through operations.',
+  confirmation: 'Prioritize customer follow-ups and confirmation outcomes.',
+  fulfillment: 'Track packing work and inventory readiness.',
+  delivery: 'Monitor parcels, failures, and final delivery status.',
+  automations: 'Review rules, draft actions, and provider activity.',
+  campaigns: 'Read channel performance and marketing recommendations.',
+  inventory: 'Control stock, product data, and low-stock risk.',
+  factory: 'Manage factories, unit costs, expenses, and margin signals.',
+  finance: 'Track revenue, COGS, expenses, and gross margin.',
+  team: 'Manage members, roles, and local invite links.',
+  settings: 'Workspace, currency, and integration controls.',
+};
+
 interface TopbarProps {
   session: Session;
   locale: string;
@@ -48,7 +63,7 @@ export function Topbar({ session, locale, onMenuClick }: TopbarProps) {
     <header className="topbar">
       <div className="topbar-context">
         <button
-          aria-label="Open navigation"
+          aria-label="Toggle navigation"
           className="icon-button menu-button"
           onClick={onMenuClick}
           type="button"
@@ -59,7 +74,9 @@ export function Topbar({ session, locale, onMenuClick }: TopbarProps) {
         </button>
         <div>
           <div className="topbar-title">{t(titleKey)}</div>
-          <div className="topbar-subtitle">Know what needs attention and move work forward.</div>
+          <div className="topbar-subtitle">
+            {SUBTITLES[activeSegment] ?? 'Keep the next business action clear.'}
+          </div>
         </div>
       </div>
 

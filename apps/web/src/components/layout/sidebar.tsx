@@ -113,7 +113,7 @@ export function Sidebar({ locale, isExpanded }: { locale: string; isExpanded: bo
       <div className="sidebar-footer">
         <span className="badge badge-info">Operations workspace</span>
         <p className="section-description">
-          Manual workflows, CSV intake, local rules, and database-backed queues are enabled.
+          Read-only integrations, approval-gated automation, and database-backed queues are active.
         </p>
       </div>
     </aside>

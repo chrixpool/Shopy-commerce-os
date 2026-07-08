@@ -108,8 +108,8 @@ export function EmptyState({ icon, title, description, action }: EmptyStateProps
 }
 
 export function ErrorState({
-  title = 'We could not load this view',
-  description = 'Please retry. If the API is starting, this may take a moment on the free hosting tier.',
+  title = 'This view needs a moment',
+  description = 'Retry the request. If the workspace API is waking up, this usually clears shortly.',
   action,
 }: {
   title?: string;
@@ -134,7 +134,7 @@ export function ErrorState({
   );
 }
 
-export function LoadingState({ title = 'Starting workspace...' }: { title?: string }) {
+export function LoadingState({ title = 'Preparing workspace...' }: { title?: string }) {
   return (
     <div className="loading-state" role="status" aria-live="polite">
       <span className="spinner" aria-hidden="true" />
