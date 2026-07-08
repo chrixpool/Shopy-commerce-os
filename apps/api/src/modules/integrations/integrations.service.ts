@@ -29,6 +29,16 @@ const ADAPTERS: IntegrationAdapter[] = [
   new ManualAdapter(),
 ];
 
+const SHOPIFY_REQUIRED_SCOPES = [
+  'read_orders',
+  'read_products',
+  'read_customers',
+  'read_inventory',
+  'read_locations',
+];
+
+type ShopifyConnectionMethod = 'CLIENT_CREDENTIALS' | 'ADMIN_TOKEN';
+
 @Injectable()
 export class IntegrationsService {
   constructor(
@@ -89,9 +99,18 @@ export class IntegrationsService {
       select: { encryptedCredentials: true, config: true },
     });
     const encryptedCredentials: Record<string, unknown> = asRecord(existing?.encryptedCredentials);
-    if (dto.accessToken) encryptedCredentials.accessToken = this.secrets.encrypt(dto.accessToken);
+    const config: Record<string, unknown> = {
+      ...asRecord(existing?.config),
+      ...providerConfig(provider, dto),
+    };
+    if (provider === IntegrationProvider.SHOPIFY) {
+      const prepared = await this.prepareShopifyConnection(config, encryptedCredentials, dto);
+      Object.assign(config, prepared.config);
+      Object.assign(encryptedCredentials, prepared.encryptedCredentials);
+    } else if (dto.accessToken) {
+      encryptedCredentials.accessToken = this.secrets.encrypt(dto.accessToken);
+    }
 
-    const config = { ...asRecord(existing?.config), ...providerConfig(provider, dto) };
     const decryptedCredentials = decryptCredentials(encryptedCredentials, this.secrets);
     const test =
       provider === IntegrationProvider.SHOPIFY
@@ -105,6 +124,12 @@ export class IntegrationsService {
             config,
             credentials: decryptedCredentials,
           });
+    if (provider === IntegrationProvider.SHOPIFY) {
+      config.lastTestAt = new Date().toISOString();
+      if ('shop' in test && test.shop) {
+        config.shop = test.shop;
+      }
+    }
 
     return this.prisma.integration.upsert({
       where: { organizationId_provider: { organizationId, provider } },
@@ -216,6 +241,90 @@ export class IntegrationsService {
     });
   }
 
+  private async prepareShopifyConnection(
+    config: Record<string, unknown>,
+    encryptedCredentials: Record<string, unknown>,
+    dto: ConnectIntegrationDto,
+  ) {
+    const connectionMethod = normalizeShopifyConnectionMethod(dto.connectionMethod);
+    const nextConfig: Record<string, unknown> = {
+      ...config,
+      connectionMethod,
+      requiredScopes: SHOPIFY_REQUIRED_SCOPES,
+      lastTestAt: new Date().toISOString(),
+    };
+    const nextEncryptedCredentials = { ...encryptedCredentials };
+
+    if (connectionMethod === 'ADMIN_TOKEN') {
+      const adminAccessToken = dto.adminAccessToken || dto.accessToken;
+      if (!adminAccessToken && !nextEncryptedCredentials.accessToken) {
+        throw new BadRequestException('Shopify Admin API access token is required.');
+      }
+      if (adminAccessToken) {
+        nextEncryptedCredentials.accessToken = this.secrets.encrypt(adminAccessToken);
+      }
+      nextConfig.scopes = [];
+      return { config: nextConfig, encryptedCredentials: nextEncryptedCredentials };
+    }
+
+    const clientId = dto.clientId || String(config.clientId ?? '');
+    const clientSecret = dto.clientSecret;
+    if (!clientId) {
+      throw new BadRequestException('Shopify Client ID is required.');
+    }
+    if (!clientSecret && !nextEncryptedCredentials.clientSecret) {
+      throw new BadRequestException('Shopify Client Secret is required.');
+    }
+
+    if (clientSecret) {
+      nextEncryptedCredentials.clientSecret = this.secrets.encrypt(clientSecret);
+    }
+    nextConfig.clientId = clientId;
+
+    const decryptedCredentials = decryptCredentials(nextEncryptedCredentials, this.secrets);
+    const token = await exchangeShopifyClientCredentials(
+      nextConfig,
+      clientId,
+      String(decryptedCredentials.clientSecret ?? ''),
+    );
+    nextEncryptedCredentials.accessToken = this.secrets.encrypt(token.accessToken);
+    nextConfig.scopes = token.scopes;
+    nextConfig.tokenExpiresAt = token.expiresIn
+      ? new Date(Date.now() + token.expiresIn * 1000).toISOString()
+      : null;
+    nextConfig.scopeWarnings = missingShopifyScopes(token.scopes);
+
+    return { config: nextConfig, encryptedCredentials: nextEncryptedCredentials };
+  }
+
+  private async shopifyAccessToken(
+    config: Record<string, unknown>,
+    credentials?: Record<string, unknown>,
+  ) {
+    const connectionMethod = normalizeShopifyConnectionMethod(
+      String(config.connectionMethod ?? ''),
+    );
+    if (connectionMethod === 'ADMIN_TOKEN') {
+      return String(credentials?.accessToken ?? '');
+    }
+
+    const clientId = String(config.clientId ?? '');
+    const clientSecret = String(credentials?.clientSecret ?? '');
+    if (!clientId || !clientSecret) return String(credentials?.accessToken ?? '');
+
+    const tokenExpiresAt = config.tokenExpiresAt ? new Date(String(config.tokenExpiresAt)) : null;
+    const shouldRefresh =
+      !credentials?.accessToken ||
+      !tokenExpiresAt ||
+      Number.isNaN(tokenExpiresAt.getTime()) ||
+      tokenExpiresAt.getTime() - Date.now() < 10 * 60 * 1000;
+
+    if (!shouldRefresh) return String(credentials?.accessToken ?? '');
+
+    const token = await exchangeShopifyClientCredentials(config, clientId, clientSecret);
+    return token.accessToken;
+  }
+
   private async testShopifyConnection(
     connection?: {
       organizationId: string;
@@ -225,7 +334,7 @@ export class IntegrationsService {
   ) {
     if (!connection) return { ok: false, message: 'Shopify is not connected.' };
     const shopDomain = normalizeShopDomain(String(connection.config.shopDomain ?? ''));
-    const accessToken = String(connection.credentials?.accessToken ?? '');
+    const accessToken = await this.shopifyAccessToken(connection.config, connection.credentials);
     if (!accessToken) return { ok: false, message: 'Shopify Admin API access token is required.' };
     const shop = await shopifyFetch<{
       shop?: { name?: string; currency?: string; plan_display_name?: string };
@@ -233,6 +342,7 @@ export class IntegrationsService {
     return {
       ok: true,
       message: `Connected to ${shop.shop?.name ?? shopDomain}. Currency: ${shop.shop?.currency ?? 'unknown'}.`,
+      shop: shop.shop,
     };
   }
 
@@ -245,7 +355,7 @@ export class IntegrationsService {
     },
     dryRun: boolean,
   ) {
-    const accessToken = String(connection.credentials?.accessToken ?? '');
+    const accessToken = await this.shopifyAccessToken(connection.config, connection.credentials);
     if (!accessToken) throw new BadRequestException('Shopify Admin API access token is required.');
     const shopDomain = normalizeShopDomain(String(connection.config.shopDomain ?? ''));
     const days = Number(process.env.SHOPIFY_DEFAULT_SYNC_DAYS || 30);
@@ -649,6 +759,7 @@ function decryptCredentials(
   return {
     ...value,
     accessToken: secrets.decrypt(value.accessToken) ?? undefined,
+    clientSecret: secrets.decrypt(value.clientSecret) ?? undefined,
   };
 }
 
@@ -661,10 +772,12 @@ function sanitizeConfig(value: unknown) {
 
 function providerConfig(provider: IntegrationProvider, dto: ConnectIntegrationDto) {
   if (provider === IntegrationProvider.SHOPIFY) {
+    const connectionMethod = normalizeShopifyConnectionMethod(dto.connectionMethod);
     return Object.fromEntries(
       Object.entries({
         shopDomain: dto.shopDomain ? normalizeShopDomain(dto.shopDomain) : undefined,
         apiVersion: dto.apiVersion || process.env.SHOPIFY_API_VERSION || '2026-01',
+        connectionMethod,
       }).filter(([, value]) => value !== undefined),
     );
   }
@@ -681,6 +794,10 @@ function providerConfig(provider: IntegrationProvider, dto: ConnectIntegrationDt
     };
   }
   return { metadata: dto.metadata ?? {} };
+}
+
+function normalizeShopifyConnectionMethod(value?: string): ShopifyConnectionMethod {
+  return value === 'ADMIN_TOKEN' ? 'ADMIN_TOKEN' : 'CLIENT_CREDENTIALS';
 }
 
 function normalizeShopDomain(input?: string) {
@@ -722,6 +839,66 @@ async function shopifyFetch<T>(
     );
   }
   return body as T;
+}
+
+async function exchangeShopifyClientCredentials(
+  config: Record<string, unknown>,
+  clientId: string,
+  clientSecret: string,
+) {
+  if (!clientSecret) throw new BadRequestException('Shopify Client Secret is required.');
+  const shopDomain = normalizeShopDomain(String(config.shopDomain ?? ''));
+  const response = await fetch(`https://${shopDomain}/admin/oauth/access_token`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({
+      grant_type: 'client_credentials',
+      client_id: clientId,
+      client_secret: clientSecret,
+    }),
+  });
+  const text = await response.text();
+  let body: unknown = text;
+  try {
+    body = text ? JSON.parse(text) : null;
+  } catch {
+    // Keep raw text for sanitized diagnostics.
+  }
+  if (!response.ok) {
+    throw new BadRequestException(shopifyTokenExchangeError(response.status, body));
+  }
+  const token = asRecord(body);
+  const accessToken = String(token.access_token ?? '');
+  if (!accessToken) {
+    throw new BadRequestException('Shopify did not return an Admin API access token.');
+  }
+  return {
+    accessToken,
+    scopes: String(token.scope ?? '')
+      .split(',')
+      .map((scope) => scope.trim())
+      .filter(Boolean),
+    expiresIn: Number(token.expires_in ?? 0) || null,
+  };
+}
+
+function shopifyTokenExchangeError(status: number, body: unknown) {
+  const record = asRecord(body);
+  const message = String(record.error_description ?? record.error ?? '');
+  if (message.includes('app_not_installed')) {
+    return 'Shopify app is not installed on this store. Install it before connecting.';
+  }
+  if (message.includes('shop_not_permitted')) {
+    return 'This Shopify app is not permitted to use client credentials for this store. Use the Admin token fallback or install an app owned by the same store organization.';
+  }
+  if (status === 401 || message.includes('invalid_client')) {
+    return 'Shopify rejected the Client ID or Client Secret. Check the credentials and try again.';
+  }
+  return `Shopify client credentials exchange failed with ${status}. Check store domain, app installation, credentials, and scopes.`;
+}
+
+function missingShopifyScopes(scopes: string[]) {
+  return SHOPIFY_REQUIRED_SCOPES.filter((scope) => !scopes.includes(scope));
 }
 
 function decimalFromString(value: unknown, fallback: number) {

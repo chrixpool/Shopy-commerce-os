@@ -34,7 +34,7 @@ Shopy is a zero-spend local/online MVP for commerce operations: auth, dashboard,
 
 Shopy now includes a safe automation foundation built around provider adapters, dry-run rules, and approval-gated draft actions.
 
-- Shopify can be connected manually with a shop domain and Admin API token for read-only order, product, customer, and inventory sync.
+- Shopify can be connected with a shop domain, Client ID, and Client Secret. Shopy exchanges those server-side for a read-only Admin API access token. Admin API token setup remains available as an advanced fallback.
 - Meta Ads is read-only in this phase. Shopy can store campaign snapshots and create draft recommendations, but it will not launch ads, pause ads, or change budgets.
 - Facebook Page and Instagram integrations are read-only plus draft-first. Shopy can collect channel context and prepare draft content ideas, but it will not publish posts automatically.
 - Manual workflows, CSV import, and local smart suggestions remain available without external credentials.
@@ -46,7 +46,9 @@ All external write-capable paths are dry-run or approval-gated. No ad spend, pub
 For local testing, add only the provider values you actually need:
 
 - `INTEGRATION_SECRET_KEY`: required before saving encrypted provider tokens.
-- `SHOPIFY_SHOP_DOMAIN`, `SHOPIFY_ADMIN_ACCESS_TOKEN`, `SHOPIFY_WEBHOOK_SECRET`: optional Shopify read-only sync and webhook validation.
+- `SHOPIFY_SHOP_DOMAIN`, `SHOPIFY_CLIENT_ID`, `SHOPIFY_CLIENT_SECRET`: optional Shopify simple setup for read-only sync.
+- `SHOPIFY_ADMIN_ACCESS_TOKEN`: optional advanced Shopify fallback.
+- `SHOPIFY_WEBHOOK_SECRET`: optional Shopify webhook validation.
 - `META_ACCESS_TOKEN`, `META_AD_ACCOUNT_ID`: optional Meta Ads read-only reporting.
 - `FACEBOOK_PAGE_ID`, `FACEBOOK_PAGE_ACCESS_TOKEN`: optional Facebook Page read-only reporting.
 - `INSTAGRAM_BUSINESS_ACCOUNT_ID`, `INSTAGRAM_ACCESS_TOKEN`: optional Instagram read-only reporting.
@@ -55,7 +57,7 @@ Provider permissions and app review may be required by Shopify or Meta before re
 
 ### Shopify Starter Setup
 
-The current Shopify path uses an existing Shopify app/store and a manual Admin API token. It is read-only/import-first and does not write back to Shopify.
+The Shopify path uses an existing Shopify app/store. It is read-only/import-first and does not write back to Shopify.
 
 Required read-only scopes:
 
@@ -74,13 +76,38 @@ Copy-Item .secrets\shopify.env.example .secrets\shopify.env
 Fill only local values in `.secrets/shopify.env`:
 
 ```env
+SHOPIFY_CONNECTION_METHOD=CLIENT_CREDENTIALS
 SHOPIFY_SHOP_DOMAIN=shorty-42095.myshopify.com
+SHOPIFY_CLIENT_ID=
+SHOPIFY_CLIENT_SECRET=
 SHOPIFY_ADMIN_ACCESS_TOKEN=
 SHOPIFY_WEBHOOK_SECRET=
 INTEGRATION_SECRET_KEY=
 ```
 
-Do not commit `.secrets/shopify.env`. The Admin API access token is different from the Shopify app client secret.
+Do not commit `.secrets/shopify.env`.
+
+Method 1, recommended: simple setup
+
+Use the Shopify app credentials from the Shopify Dev Dashboard:
+
+- Store domain: `shorty-42095.myshopify.com`
+- Client ID
+- Client Secret
+
+Shopy exchanges these credentials on the server using Shopify's client credentials grant, stores secrets encrypted, and uses the generated Admin API access token for read-only sync. The Shopify app must be installed on the store and must have the required read scopes. If Shopify returns `app_not_installed`, install the app on the store. If Shopify returns `shop_not_permitted`, use the advanced Admin token fallback or ensure the app is owned by the same store organization.
+
+Method 2, fallback: Admin API token
+
+Set:
+
+```env
+SHOPIFY_CONNECTION_METHOD=ADMIN_TOKEN
+SHOPIFY_SHOP_DOMAIN=shorty-42095.myshopify.com
+SHOPIFY_ADMIN_ACCESS_TOKEN=
+```
+
+Use this if client credentials are not permitted for the store.
 
 Validation scripts:
 
@@ -108,7 +135,10 @@ Useful topics for this phase:
 Render env names for Shopify, values not committed:
 
 - `INTEGRATION_SECRET_KEY`
+- `SHOPIFY_CONNECTION_METHOD`
 - `SHOPIFY_SHOP_DOMAIN`
+- `SHOPIFY_CLIENT_ID`
+- `SHOPIFY_CLIENT_SECRET`
 - `SHOPIFY_ADMIN_ACCESS_TOKEN`
 - `SHOPIFY_WEBHOOK_SECRET`
 - `SHOPIFY_API_VERSION`

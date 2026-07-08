@@ -1,4 +1,9 @@
-import { loadShopifyEnv, normalizeShopDomain, shopifyAdminFetch } from './_shopify-utils.mjs';
+import {
+  connectionMethod,
+  loadShopifyEnv,
+  normalizeShopDomain,
+  shopifyAdminFetch,
+} from './_shopify-utils.mjs';
 
 loadShopifyEnv();
 
@@ -13,6 +18,7 @@ const [products, customers, orders] = await Promise.all([
 ]);
 
 console.log('Shopify dry-run sync');
+console.log(`Connection method: ${connectionMethod()}`);
 console.log(`Shop: ${shopDomain}`);
 console.log(`Window: last ${sinceDays} days`);
 console.log(`Products sample count: ${(products.products ?? []).length}`);

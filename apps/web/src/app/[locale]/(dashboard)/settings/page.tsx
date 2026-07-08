@@ -68,7 +68,11 @@ async function connectIntegration(formData: FormData) {
   await apiFetch(`/api/v1/integrations/${provider.toLowerCase().replaceAll('_', '-')}/connect`, {
     method: 'POST',
     body: JSON.stringify({
+      connectionMethod: String(formData.get('connectionMethod') ?? ''),
       shopDomain: String(formData.get('shopDomain') ?? ''),
+      clientId: String(formData.get('clientId') ?? ''),
+      clientSecret: String(formData.get('clientSecret') ?? ''),
+      adminAccessToken: String(formData.get('adminAccessToken') ?? ''),
       accountId: String(formData.get('accountId') ?? ''),
       pageId: String(formData.get('pageId') ?? ''),
       instagramBusinessAccountId: String(formData.get('instagramBusinessAccountId') ?? ''),
@@ -268,6 +272,16 @@ export default async function SettingsPage({ params }: { params: Promise<{ local
             const isExternal = ['SHOPIFY', 'META_ADS', 'FACEBOOK_PAGE', 'INSTAGRAM'].includes(
               integration.provider,
             );
+            const connectionMethod = String(
+              integration.config?.connectionMethod ?? 'CLIENT_CREDENTIALS',
+            );
+            const grantedScopes = Array.isArray(integration.config?.scopes)
+              ? integration.config.scopes.map(String)
+              : [];
+            const scopeWarnings = Array.isArray(integration.config?.scopeWarnings)
+              ? integration.config.scopeWarnings.map(String)
+              : [];
+            const shop = integration.config?.shop as Record<string, unknown> | undefined;
             return (
               <div className="queue-card" key={integration.provider}>
                 <div className="queue-card-header">
@@ -298,6 +312,22 @@ export default async function SettingsPage({ params }: { params: Promise<{ local
                     <input name="mode" type="hidden" value="READ_ONLY" />
                     {integration.provider === 'SHOPIFY' ? (
                       <>
+                        <label className="form-field" style={{ gridColumn: '1 / -1' }}>
+                          <span>Connection method</span>
+                          <select
+                            className="select-field"
+                            name="connectionMethod"
+                            defaultValue={connectionMethod}
+                          >
+                            <option value="CLIENT_CREDENTIALS">Simple setup</option>
+                            <option value="ADMIN_TOKEN">Advanced: Admin API token</option>
+                          </select>
+                          <small className="field-help">
+                            Simple setup uses your Shopify app Client ID and Client Secret to
+                            generate a read-only Admin API access token on the server. Shopy
+                            encrypts credentials and does not modify your Shopify store.
+                          </small>
+                        </label>
                         <label className="form-field">
                           <span>Shop domain</span>
                           <input
@@ -316,6 +346,38 @@ export default async function SettingsPage({ params }: { params: Promise<{ local
                             defaultValue={String(integration.config?.apiVersion ?? '2026-01')}
                           />
                         </label>
+                        <label className="form-field">
+                          <span>Client ID</span>
+                          <input
+                            className="field"
+                            name="clientId"
+                            placeholder="Shopify app Client ID"
+                            defaultValue={String(integration.config?.clientId ?? '')}
+                            autoComplete="off"
+                          />
+                        </label>
+                        <label className="form-field">
+                          <span>Client Secret</span>
+                          <input
+                            className="field"
+                            name="clientSecret"
+                            placeholder="Paste to connect or rotate"
+                            type="password"
+                            autoComplete="off"
+                          />
+                        </label>
+                        <details className="form-field" style={{ gridColumn: '1 / -1' }}>
+                          <summary>Advanced Admin API token fallback</summary>
+                          <div style={{ marginTop: 10 }}>
+                            <input
+                              className="field"
+                              name="adminAccessToken"
+                              placeholder="Paste Admin API access token"
+                              type="password"
+                              autoComplete="off"
+                            />
+                          </div>
+                        </details>
                         <p className="field-help" style={{ gridColumn: '1 / -1' }}>
                           Required read-only scopes: read_orders, read_products, read_customers,
                           read_inventory, read_locations.
@@ -344,18 +406,20 @@ export default async function SettingsPage({ params }: { params: Promise<{ local
                         />
                       </label>
                     ) : null}
-                    <label className="form-field" style={{ gridColumn: '1 / -1' }}>
-                      <span>Access token</span>
-                      <input
-                        className="field"
-                        name="accessToken"
-                        placeholder="Paste token to replace saved credential"
-                        type="password"
-                      />
-                    </label>
+                    {integration.provider !== 'SHOPIFY' ? (
+                      <label className="form-field" style={{ gridColumn: '1 / -1' }}>
+                        <span>Access token</span>
+                        <input
+                          className="field"
+                          name="accessToken"
+                          placeholder="Paste token to replace saved credential"
+                          type="password"
+                        />
+                      </label>
+                    ) : null}
                     <div className="form-actions">
                       <button className="button button-secondary" type="submit">
-                        Save connection
+                        {integration.provider === 'SHOPIFY' ? 'Connect & test' : 'Save connection'}
                       </button>
                     </div>
                   </form>
@@ -394,6 +458,27 @@ export default async function SettingsPage({ params }: { params: Promise<{ local
                 </div>
                 {integration.errorMessage ? (
                   <p className="field-help">Status note: {integration.errorMessage}</p>
+                ) : null}
+                {integration.provider === 'SHOPIFY' ? (
+                  <div className="field-help">
+                    <p>Connection method: {connectionMethod.replaceAll('_', ' ').toLowerCase()}</p>
+                    {shop?.name ? <p>Connected shop: {String(shop.name)}</p> : null}
+                    {grantedScopes.length ? (
+                      <p>Granted scopes: {grantedScopes.join(', ')}</p>
+                    ) : null}
+                    {scopeWarnings.length ? (
+                      <p>Scope warnings: {scopeWarnings.join(', ')}</p>
+                    ) : null}
+                    {integration.config?.lastTestAt ? (
+                      <p>
+                        Last test:{' '}
+                        {new Intl.DateTimeFormat(locale, {
+                          dateStyle: 'medium',
+                          timeStyle: 'short',
+                        }).format(new Date(String(integration.config.lastTestAt)))}
+                      </p>
+                    ) : null}
+                  </div>
                 ) : null}
                 <p className="field-help">
                   Last sync:{' '}

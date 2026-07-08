@@ -1,7 +1,13 @@
 import { IsBoolean, IsIn, IsObject, IsOptional, IsString } from 'class-validator';
 import { INTEGRATION_MODES } from '@shopy/shared';
 
+const SHOPIFY_CONNECTION_METHODS = ['CLIENT_CREDENTIALS', 'ADMIN_TOKEN'] as const;
+
 export class ConnectIntegrationDto {
+  @IsOptional()
+  @IsIn(SHOPIFY_CONNECTION_METHODS)
+  connectionMethod?: string;
+
   @IsOptional()
   @IsString()
   shopDomain?: string;
@@ -9,6 +15,18 @@ export class ConnectIntegrationDto {
   @IsOptional()
   @IsString()
   accessToken?: string;
+
+  @IsOptional()
+  @IsString()
+  adminAccessToken?: string;
+
+  @IsOptional()
+  @IsString()
+  clientId?: string;
+
+  @IsOptional()
+  @IsString()
+  clientSecret?: string;
 
   @IsOptional()
   @IsString()
