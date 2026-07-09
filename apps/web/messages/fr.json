@@ -27,6 +27,8 @@
     "inventory": "Inventaire",
     "factory": "Atelier et coûts",
     "finance": "Finance",
+    "activity": "Activité",
+    "help": "Aide",
     "team": "Équipe",
     "settings": "Paramètres",
     "ai": "Assistant IA"

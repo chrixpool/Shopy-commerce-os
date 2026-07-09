@@ -22,12 +22,14 @@ const TITLES: Record<string, string> = {
   inventory: 'inventory',
   factory: 'factory',
   finance: 'finance',
+  activity: 'activity',
+  help: 'help',
   team: 'team',
   settings: 'settings',
 };
 
 const SUBTITLES: Record<string, string> = {
-  dashboard: 'Command center for today’s commerce work.',
+  dashboard: "Command center for today's commerce work.",
   orders: 'Create, import, and move orders through operations.',
   confirmation: 'Prioritize customer follow-ups and confirmation outcomes.',
   fulfillment: 'Track packing work and inventory readiness.',
@@ -37,6 +39,8 @@ const SUBTITLES: Record<string, string> = {
   inventory: 'Control stock, product data, and low-stock risk.',
   factory: 'Manage factories, unit costs, expenses, and margin signals.',
   finance: 'Track revenue, COGS, expenses, and gross margin.',
+  activity: 'Review imports, order movement, automations, and sync history.',
+  help: 'Use concise operating guides for the core Shopy workflows.',
   team: 'Manage members, roles, and local invite links.',
   settings: 'Workspace, currency, and integration controls.',
 };

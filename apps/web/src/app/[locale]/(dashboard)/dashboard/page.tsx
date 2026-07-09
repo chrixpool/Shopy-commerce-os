@@ -89,6 +89,50 @@ export default async function DashboardPage({ params }: { params: Promise<{ loca
   const pendingDrafts = draftActions.filter((action) =>
     ['DRAFT', 'PENDING_APPROVAL'].includes(action.status),
   );
+  const shopify = integrations.find((integration) => integration.provider === 'SHOPIFY');
+  const meta = integrations.find((integration) => integration.provider === 'META_ADS');
+  const alerts = [
+    summary.workQueues.pendingConfirmation
+      ? {
+          title: 'Confirmation queue needs action',
+          copy: `${summary.workQueues.pendingConfirmation} order(s) are waiting for customer confirmation.`,
+          href: 'confirmation',
+          tone: 'warning',
+        }
+      : null,
+    summary.workQueues.lowStockProducts
+      ? {
+          title: 'Low stock risk',
+          copy: `${summary.workQueues.lowStockProducts} product(s) are at or below threshold.`,
+          href: 'inventory',
+          tone: 'warning',
+        }
+      : null,
+    costing.productsMissingCost
+      ? {
+          title: 'Product cost data missing',
+          copy: `${costing.productsMissingCost} product(s) need unit costs before margin is reliable.`,
+          href: 'factory',
+          tone: 'warning',
+        }
+      : null,
+    shopify?.status === 'ERROR'
+      ? {
+          title: 'Shopify sync needs review',
+          copy: 'Check credentials, scopes, or store domain in Settings.',
+          href: 'settings',
+          tone: 'danger',
+        }
+      : null,
+    meta && meta.status !== 'CONNECTED'
+      ? {
+          title: 'Marketing data is not connected',
+          copy: 'Meta Ads remains read-only and disconnected until credentials are configured.',
+          href: 'campaigns',
+          tone: 'muted',
+        }
+      : null,
+  ].filter(Boolean) as Array<{ title: string; copy: string; href: string; tone: string }>;
   const rows = [
     {
       work: 'Confirm customers',
@@ -256,6 +300,14 @@ export default async function DashboardPage({ params }: { params: Promise<{ loca
               <span>Automation rules</span>
               <small>Run dry-run workflows</small>
             </Link>
+            <Link className="quick-action" href={`/${locale}/activity`} prefetch>
+              <span>Activity log</span>
+              <small>Review imports and runs</small>
+            </Link>
+            <Link className="quick-action" href={`/${locale}/help`} prefetch>
+              <span>Help center</span>
+              <small>Use operating guides</small>
+            </Link>
             <Link className="quick-action" href={`/${locale}/settings`} prefetch>
               <span>Connect channels</span>
               <small>Manage integrations</small>
@@ -287,6 +339,42 @@ export default async function DashboardPage({ params }: { params: Promise<{ loca
               icon="OK"
               title="No urgent priorities"
               description="Queues are healthy. New suggestions appear when local operating rules detect work that needs attention."
+            />
+          )}
+        </SurfaceCard>
+
+        <SurfaceCard>
+          <SectionHeader
+            title="Alerts"
+            description="Current operating risks from workflow, stock, costing, and channel status."
+          />
+          {alerts.length ? (
+            <div className="priority-list">
+              {alerts.map((alert) => (
+                <Link
+                  className="priority-item"
+                  href={`/${locale}/${alert.href}`}
+                  key={alert.title}
+                  prefetch
+                >
+                  <span className="priority-dot" aria-hidden="true" />
+                  <div>
+                    <p className="step-title">{alert.title}</p>
+                    <p className="step-copy">
+                      <StatusBadge tone={alert.tone as 'warning' | 'danger' | 'muted'}>
+                        Review
+                      </StatusBadge>{' '}
+                      {alert.copy}
+                    </p>
+                  </div>
+                </Link>
+              ))}
+            </div>
+          ) : (
+            <EmptyState
+              icon="OK"
+              title="No active alerts"
+              description="Queue, inventory, costing, and provider checks are currently clear."
             />
           )}
         </SurfaceCard>

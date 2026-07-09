@@ -180,6 +180,21 @@ export default async function FactoryPage({ params }: { params: Promise<{ locale
     ]);
 
   const activeExpenses = expenses.filter((expense) => expense.active);
+  const pricedProducts = productCosts.slice(0, 6).map((cost) => {
+    const unitCost = numberValue(cost.totalUnitCost);
+    const retail = numberValue(cost.product.price);
+    const targetMargin = 0.55;
+    return {
+      id: cost.id,
+      product: cost.product.name,
+      sku: cost.product.sku ?? 'No SKU',
+      retail,
+      unitCost,
+      margin: retail - unitCost,
+      recommendedPrice: unitCost > 0 ? unitCost / (1 - targetMargin) : 0,
+      currency: cost.currency,
+    };
+  });
 
   return (
     <div className="page-stack">
@@ -401,6 +416,75 @@ export default async function FactoryPage({ params }: { params: Promise<{ locale
           </>
         )}
       </SurfaceCard>
+
+      <section className="panel-grid">
+        <SurfaceCard>
+          <SectionHeader
+            title="Price estimator"
+            description="Compare current retail price against unit cost and a 55% target margin."
+            actions={<StatusBadge tone="info">No FX conversion</StatusBadge>}
+          />
+          {pricedProducts.length ? (
+            <div className="table-wrap" style={{ marginTop: 16 }}>
+              <table className="data-table">
+                <thead>
+                  <tr>
+                    <th>Product</th>
+                    <th>Unit cost</th>
+                    <th>Current price</th>
+                    <th>Recommended price</th>
+                    <th>Margin signal</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {pricedProducts.map((item) => (
+                    <tr key={item.id}>
+                      <td>
+                        <div className="strong-cell">{item.product}</div>
+                        <div>{item.sku}</div>
+                      </td>
+                      <td>{formatMoney(item.unitCost, item.currency, locale)}</td>
+                      <td>{formatMoney(item.retail, workspace.baseCurrency, locale)}</td>
+                      <td>{formatMoney(item.recommendedPrice, item.currency, locale)}</td>
+                      <td>
+                        <StatusBadge tone={item.margin >= 0 ? 'success' : 'warning'}>
+                          {item.margin >= 0 ? 'priced above cost' : 'below cost'}
+                        </StatusBadge>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          ) : (
+            <EmptyState
+              icon="PX"
+              title="Cost products to activate price estimates"
+              description="Add product costs first. Shopy will then compare retail price, unit cost, and recommended target-margin pricing."
+            />
+          )}
+        </SurfaceCard>
+
+        <SurfaceCard>
+          <SectionHeader
+            title="Fabric and document intake"
+            description="Prepared for textile sheets, supplier quotes, and manufacturing files."
+            actions={<StatusBadge tone="muted">Storage not enabled</StatusBadge>}
+          />
+          <div className="empty-state" style={{ minHeight: 180, marginTop: 16 }}>
+            <div>
+              <span className="empty-icon" aria-hidden="true">
+                UP
+              </span>
+              <h2 className="empty-title">Upload planning area</h2>
+              <p className="empty-description">
+                File upload is intentionally disabled until a free-safe storage path is selected.
+                Use notes and cost components for now; no paid storage is required.
+              </p>
+            </div>
+          </div>
+        </SurfaceCard>
+      </section>
 
       <section className="panel-grid">
         <SurfaceCard>

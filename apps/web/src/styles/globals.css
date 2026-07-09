@@ -783,6 +783,43 @@ a {
   font-size: 12px;
 }
 
+.activity-list {
+  display: grid;
+  gap: 10px;
+}
+
+.activity-item {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface-soft);
+  padding: 14px;
+}
+
+.activity-title {
+  margin: 0;
+  color: var(--text-1);
+  font-size: 14px;
+  font-weight: 800;
+}
+
+.activity-description {
+  margin: 4px 0 0;
+  color: var(--text-2);
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.activity-time {
+  margin: 6px 0 0;
+  color: var(--text-3);
+  font-size: 12px;
+  font-weight: 650;
+}
+
 .toolbar {
   display: flex;
   flex-wrap: wrap;
@@ -1518,6 +1555,10 @@ a {
 
   .sync-history-row {
     align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .activity-item {
     flex-direction: column;
   }
 

@@ -28,6 +28,8 @@ const GROWTH_ITEMS: NavItem[] = [
 ];
 
 const ADMIN_ITEMS: NavItem[] = [
+  { key: 'activity', href: 'activity', icon: 'activity' },
+  { key: 'help', href: 'help', icon: 'help' },
   { key: 'team', href: 'team', icon: 'team' },
   { key: 'settings', href: 'settings', icon: 'settings' },
 ];
@@ -43,6 +45,8 @@ type IconName =
   | 'inventory'
   | 'factory'
   | 'finance'
+  | 'activity'
+  | 'help'
   | 'team'
   | 'settings';
 
@@ -194,6 +198,23 @@ function NavIcon({ name }: { name: IconName }) {
         <path d="M5 19V5" />
         <path d="M5 19h14" />
         <path d="M8 15l3-3 3 2 4-6" />
+      </>
+    ),
+    activity: (
+      <>
+        <path d="M4 5h16" />
+        <path d="M4 12h16" />
+        <path d="M4 19h16" />
+        <path d="M7 5v0" />
+        <path d="M11 12v0" />
+        <path d="M15 19v0" />
+      </>
+    ),
+    help: (
+      <>
+        <path d="M12 18h.01" />
+        <path d="M9.5 9a2.5 2.5 0 1 1 4.2 1.8c-.9.7-1.7 1.2-1.7 2.7" />
+        <path d="M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" />
       </>
     ),
     team: (
