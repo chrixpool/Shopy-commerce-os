@@ -107,6 +107,62 @@ export async function shopifyAdminFetch(pathname, init = {}) {
   return body;
 }
 
+export async function shopifyAdminFetchAll(firstPath, key, maxPages = Number(process.env.SHOPIFY_MAX_SYNC_PAGES || 20)) {
+  const items = [];
+  let pages = 0;
+  let nextPath = firstPath;
+  const pageLimit = Number.isFinite(maxPages) && maxPages > 0 ? maxPages : 20;
+
+  while (nextPath && pages < pageLimit) {
+    const { body, next } = await shopifyAdminFetchPage(nextPath);
+    items.push(...(Array.isArray(body?.[key]) ? body[key] : []));
+    nextPath = next;
+    pages += 1;
+  }
+
+  return { items, pages, capped: Boolean(nextPath) };
+}
+
+async function shopifyAdminFetchPage(pathname) {
+  const shopDomain = normalizeShopDomain();
+  const accessToken = await shopifyAccessToken();
+  const apiVersion = process.env.SHOPIFY_API_VERSION || '2026-01';
+  const url = `https://${shopDomain}/admin/api/${apiVersion}${pathname}`;
+  const response = await fetch(url, {
+    headers: {
+      Accept: 'application/json',
+      'Content-Type': 'application/json',
+      'X-Shopify-Access-Token': accessToken,
+    },
+  });
+  const text = await response.text();
+  let body = text;
+  try {
+    body = text ? JSON.parse(text) : null;
+  } catch {
+    // Keep raw text for sanitized diagnostics.
+  }
+  if (!response.ok) {
+    throw new Error(`Shopify request failed ${response.status}: ${JSON.stringify(body).slice(0, 500)}`);
+  }
+  return { body, next: shopifyNextPath(response.headers.get('link'), apiVersion) };
+}
+
+function shopifyNextPath(linkHeader, apiVersion) {
+  if (!linkHeader) return undefined;
+  const nextLink = linkHeader
+    .split(',')
+    .map((part) => part.trim())
+    .find((part) => part.includes('rel="next"'));
+  const href = nextLink?.match(/<([^>]+)>/)?.[1];
+  if (!href) return undefined;
+  const url = new URL(href);
+  const marker = `/admin/api/${apiVersion}`;
+  const markerIndex = url.pathname.indexOf(marker);
+  const path = markerIndex >= 0 ? url.pathname.slice(markerIndex + marker.length) : url.pathname;
+  return `${path}${url.search}`;
+}
+
 export function verifyHmac(rawBody, secret, hmac) {
   const digest = createHmac('sha256', secret).update(rawBody, 'utf8').digest('base64');
   const left = Buffer.from(digest);

@@ -66,6 +66,7 @@ Required read-only scopes:
 - `read_customers`
 - `read_inventory`
 - `read_locations`
+- `read_all_orders` if you need full historical order import beyond Shopify's normal recent-order window
 
 Local secret file:
 
@@ -96,6 +97,8 @@ Use the Shopify app credentials from the Shopify Dev Dashboard:
 - Client Secret
 
 Shopy exchanges these credentials on the server using Shopify's client credentials grant, stores secrets encrypted, and uses the generated Admin API access token for read-only sync. The Shopify app must be installed on the store and must have the required read scopes. If Shopify returns `app_not_installed`, install the app on the store. If Shopify returns `shop_not_permitted`, use the advanced Admin token fallback or ensure the app is owned by the same store organization.
+
+Shopify sync cursor-paginates products, customers, and orders with a safety cap. Set `SHOPIFY_MAX_SYNC_PAGES` to increase the maximum page count per resource. If old orders still do not appear, grant `read_all_orders` where Shopify permits it.
 
 Method 2, fallback: Admin API token
 
@@ -143,7 +146,7 @@ Render env names for Shopify, values not committed:
 - `SHOPIFY_WEBHOOK_SECRET`
 - `SHOPIFY_API_VERSION`
 - `SHOPIFY_ALLOWED_SCOPES`
-- `SHOPIFY_DEFAULT_SYNC_DAYS`
+- `SHOPIFY_MAX_SYNC_PAGES`
 
 If the Shopify app secret has been shown in a screenshot or chat, rotate it before relying on it for production webhook verification.
 

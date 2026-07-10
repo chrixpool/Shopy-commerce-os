@@ -36,6 +36,7 @@ const SHOPIFY_REQUIRED_SCOPES = [
   'read_inventory',
   'read_locations',
 ];
+const SHOPIFY_FULL_HISTORY_SCOPE = 'read_all_orders';
 
 type ShopifyConnectionMethod = 'CLIENT_CREDENTIALS' | 'ADMIN_TOKEN';
 
@@ -358,31 +359,37 @@ export class IntegrationsService {
     const accessToken = await this.shopifyAccessToken(connection.config, connection.credentials);
     if (!accessToken) throw new BadRequestException('Shopify Admin API access token is required.');
     const shopDomain = normalizeShopDomain(String(connection.config.shopDomain ?? ''));
-    const days = Number(process.env.SHOPIFY_DEFAULT_SYNC_DAYS || 30);
-    const createdAtMin = new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString();
+    const maxPages = Number(process.env.SHOPIFY_MAX_SYNC_PAGES || 20);
 
-    const [productsResponse, customersResponse, ordersResponse] = await Promise.all([
-      shopifyFetch<ShopifyProductsResponse>(
+    const [products, customers, orders] = await Promise.all([
+      shopifyFetchAll<ShopifyProduct, ShopifyProductsResponse>(
         connection.config,
         accessToken,
-        '/products.json?limit=50&fields=id,title,handle,images,variants,created_at,updated_at',
+        '/products.json?limit=250&fields=id,title,handle,images,variants,created_at,updated_at',
+        'products',
+        maxPages,
       ),
-      shopifyFetch<ShopifyCustomersResponse>(
+      shopifyFetchAll<ShopifyCustomer, ShopifyCustomersResponse>(
         connection.config,
         accessToken,
-        '/customers.json?limit=50&fields=id,first_name,last_name,email,phone,default_address,created_at,updated_at',
+        '/customers.json?limit=250&fields=id,first_name,last_name,email,phone,default_address,created_at,updated_at',
+        'customers',
+        maxPages,
       ),
-      shopifyFetch<ShopifyOrdersResponse>(
+      shopifyFetchAll<ShopifyOrder, ShopifyOrdersResponse>(
         connection.config,
         accessToken,
-        `/orders.json?status=any&limit=50&created_at_min=${encodeURIComponent(createdAtMin)}`,
+        '/orders.json?status=any&limit=250',
+        'orders',
+        maxPages,
       ),
     ]);
 
-    const products = productsResponse.products ?? [];
-    const customers = customersResponse.customers ?? [];
-    const orders = ordersResponse.orders ?? [];
-    const warnings = await this.shopifyCurrencyWarnings(connection.organizationId, orders);
+    const warnings = [
+      ...(await this.shopifyCurrencyWarnings(connection.organizationId, orders.items)),
+      ...shopifyPaginationWarnings({ products, customers, orders }, maxPages),
+      ...shopifyHistoryScopeWarnings(connection.config),
+    ];
 
     const run = await this.prisma.automationRun.create({
       data: {
@@ -395,9 +402,14 @@ export class IntegrationsService {
         },
         outputSnapshot: {
           shopDomain,
-          products: products.length,
-          customers: customers.length,
-          orders: orders.length,
+          products: products.items.length,
+          customers: customers.items.length,
+          orders: orders.items.length,
+          pages: {
+            products: products.pages,
+            customers: customers.pages,
+            orders: orders.pages,
+          },
           warnings,
         },
         finishedAt: new Date(),
@@ -410,7 +422,11 @@ export class IntegrationsService {
         dryRun,
         summary:
           'Shopify dry-run completed. No records were imported and no Shopify writes were made.',
-        counts: { products: products.length, customers: customers.length, orders: orders.length },
+        counts: {
+          products: products.items.length,
+          customers: customers.items.length,
+          orders: orders.items.length,
+        },
         warnings,
         runId: run.id,
       };
@@ -418,9 +434,9 @@ export class IntegrationsService {
 
     const imported = await this.importShopifyRecords(
       connection.organizationId,
-      products,
-      customers,
-      orders,
+      products.items,
+      customers.items,
+      orders.items,
     );
     await this.prisma.integration.update({
       where: { id: integrationId },
@@ -839,6 +855,101 @@ async function shopifyFetch<T>(
     );
   }
   return body as T;
+}
+
+async function shopifyFetchPage<T>(
+  config: Record<string, unknown>,
+  accessToken: string,
+  pathname: string,
+): Promise<{ body: T; nextPath?: string }> {
+  const shopDomain = normalizeShopDomain(String(config.shopDomain ?? ''));
+  const apiVersion = String(config.apiVersion || process.env.SHOPIFY_API_VERSION || '2026-01');
+  const response = await fetch(`https://${shopDomain}/admin/api/${apiVersion}${pathname}`, {
+    headers: {
+      Accept: 'application/json',
+      'Content-Type': 'application/json',
+      'X-Shopify-Access-Token': accessToken,
+    },
+  });
+  const text = await response.text();
+  let body: unknown = text;
+  try {
+    body = text ? JSON.parse(text) : null;
+  } catch {
+    // Keep text for sanitized API diagnostics.
+  }
+  if (!response.ok) {
+    throw new BadRequestException(
+      `Shopify Admin API request failed with ${response.status}. Check shop domain, token, API version, and read-only scopes.`,
+    );
+  }
+  return {
+    body: body as T,
+    nextPath: shopifyNextPath(response.headers.get('link'), apiVersion),
+  };
+}
+
+async function shopifyFetchAll<TItem, TResponse extends object>(
+  config: Record<string, unknown>,
+  accessToken: string,
+  firstPath: string,
+  key: string,
+  maxPages: number,
+) {
+  const items: TItem[] = [];
+  let pages = 0;
+  let nextPath: string | undefined = firstPath;
+  const pageLimit = Number.isFinite(maxPages) && maxPages > 0 ? maxPages : 20;
+
+  while (nextPath && pages < pageLimit) {
+    const pageResult: { body: TResponse; nextPath?: string } = await shopifyFetchPage<TResponse>(
+      config,
+      accessToken,
+      nextPath,
+    );
+    const body = pageResult.body as Record<string, unknown>;
+    const pageItems = Array.isArray(body[key]) ? (body[key] as TItem[]) : [];
+    items.push(...pageItems);
+    pages += 1;
+    nextPath = pageResult.nextPath;
+  }
+
+  return { items, pages, capped: Boolean(nextPath) };
+}
+
+function shopifyNextPath(linkHeader: string | null, apiVersion: string) {
+  if (!linkHeader) return undefined;
+  const nextLink = linkHeader
+    .split(',')
+    .map((part) => part.trim())
+    .find((part) => part.includes('rel="next"'));
+  const href = nextLink?.match(/<([^>]+)>/)?.[1];
+  if (!href) return undefined;
+  const url = new URL(href);
+  const marker = `/admin/api/${apiVersion}`;
+  const markerIndex = url.pathname.indexOf(marker);
+  const path = markerIndex >= 0 ? url.pathname.slice(markerIndex + marker.length) : url.pathname;
+  return `${path}${url.search}`;
+}
+
+function shopifyPaginationWarnings(
+  resources: Record<string, { capped: boolean; pages: number; items: unknown[] }>,
+  maxPages: number,
+) {
+  return Object.entries(resources)
+    .filter(([, value]) => value.capped)
+    .map(
+      ([resource, value]) =>
+        `Shopify ${resource} sync reached the safety cap of ${maxPages} page(s) after importing ${value.items.length} record(s). Increase SHOPIFY_MAX_SYNC_PAGES to import more.`,
+    );
+}
+
+function shopifyHistoryScopeWarnings(config: Record<string, unknown>) {
+  const scopes = Array.isArray(config.scopes) ? config.scopes.map(String) : [];
+  if (scopes.includes(SHOPIFY_FULL_HISTORY_SCOPE)) return [];
+  return [
+    `For complete historical order import beyond Shopify's normal recent-order window, grant ${SHOPIFY_FULL_HISTORY_SCOPE} to the Shopify app/token if your store plan and app permissions allow it.`,
+  ];
 }
 
 async function exchangeShopifyClientCredentials(

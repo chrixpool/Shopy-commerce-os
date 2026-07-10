@@ -1,8 +1,10 @@
 import { auth } from './auth';
 import { normalizeCurrencyCode, type WorkspaceSettings } from './currency';
+import { cache } from 'react';
 
 const API_URL = process.env.API_URL || process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000';
 const API_INTERNAL_SECRET = process.env.API_INTERNAL_SECRET || 'shopy-internal-secret';
+const getApiSession = cache(auth);
 
 function apiUrl(path: string) {
   const base = API_URL.replace(/\/$/, '');
@@ -13,7 +15,7 @@ function apiUrl(path: string) {
 }
 
 export async function apiFetch<T>(path: string, init: RequestInit = {}): Promise<T> {
-  const session = await auth();
+  const session = await getApiSession();
   if (!session?.user) {
     throw new Error('Not authenticated');
   }
@@ -65,10 +67,10 @@ export async function apiFetch<T>(path: string, init: RequestInit = {}): Promise
   );
 }
 
-export async function getWorkspaceSettings() {
+export const getWorkspaceSettings = cache(async () => {
   const settings = await apiFetch<WorkspaceSettings>('/api/v1/settings/organization');
   return {
     ...settings,
     baseCurrency: normalizeCurrencyCode(settings.baseCurrency),
   };
-}
+});

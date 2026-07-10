@@ -392,7 +392,8 @@ export default async function SettingsPage({ params }: { params: Promise<{ local
                         </details>
                         <p className="field-help" style={{ gridColumn: '1 / -1' }}>
                           Required read-only scopes: read_orders, read_products, read_customers,
-                          read_inventory, read_locations.
+                          read_inventory, read_locations. For full historical order import, add
+                          read_all_orders if Shopify allows it for your app/store.
                         </p>
                       </>
                     ) : null}

@@ -2,26 +2,33 @@ import {
   connectionMethod,
   loadShopifyEnv,
   normalizeShopDomain,
-  shopifyAdminFetch,
+  shopifyAdminFetchAll,
 } from './_shopify-utils.mjs';
 
 loadShopifyEnv();
 
 const shopDomain = normalizeShopDomain();
-const sinceDays = Number(process.env.SHOPIFY_DEFAULT_SYNC_DAYS || 30);
-const since = new Date(Date.now() - sinceDays * 24 * 60 * 60 * 1000).toISOString();
+const maxPages = Number(process.env.SHOPIFY_MAX_SYNC_PAGES || 20);
 
 const [products, customers, orders] = await Promise.all([
-  shopifyAdminFetch('/products.json?limit=5&fields=id,title,handle,variants,created_at,updated_at'),
-  shopifyAdminFetch('/customers.json?limit=5&fields=id,first_name,last_name,email,phone,default_address,created_at,updated_at'),
-  shopifyAdminFetch(`/orders.json?status=any&limit=5&created_at_min=${encodeURIComponent(since)}`),
+  shopifyAdminFetchAll(
+    '/products.json?limit=250&fields=id,title,handle,variants,created_at,updated_at',
+    'products',
+    maxPages,
+  ),
+  shopifyAdminFetchAll(
+    '/customers.json?limit=250&fields=id,first_name,last_name,email,phone,default_address,created_at,updated_at',
+    'customers',
+    maxPages,
+  ),
+  shopifyAdminFetchAll('/orders.json?status=any&limit=250', 'orders', maxPages),
 ]);
 
 console.log('Shopify dry-run sync');
 console.log(`Connection method: ${connectionMethod()}`);
 console.log(`Shop: ${shopDomain}`);
-console.log(`Window: last ${sinceDays} days`);
-console.log(`Products sample count: ${(products.products ?? []).length}`);
-console.log(`Customers sample count: ${(customers.customers ?? []).length}`);
-console.log(`Orders sample count: ${(orders.orders ?? []).length}`);
+console.log(`Safety cap: ${maxPages} page(s) per resource`);
+console.log(`Products available: ${products.items.length}${products.capped ? ' (capped)' : ''}`);
+console.log(`Customers available: ${customers.items.length}${customers.capped ? ' (capped)' : ''}`);
+console.log(`Orders available: ${orders.items.length}${orders.capped ? ' (capped)' : ''}`);
 console.log('No records were imported and no Shopify writes were made.');
