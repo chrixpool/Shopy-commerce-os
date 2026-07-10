@@ -101,13 +101,17 @@ async function syncIntegration(formData: FormData) {
 
   const provider = String(formData.get('provider') ?? '');
   const dryRun = formData.get('dryRun') === 'true';
-  await apiFetch(
-    `/api/v1/integrations/${provider.toLowerCase().replaceAll('_', '-')}${dryRun ? '/dry-run' : '/sync'}`,
-    {
-      method: 'POST',
-      body: JSON.stringify({ dryRun }),
-    },
-  );
+  try {
+    await apiFetch(
+      `/api/v1/integrations/${provider.toLowerCase().replaceAll('_', '-')}${dryRun ? '/dry-run' : '/sync'}`,
+      {
+        method: 'POST',
+        body: JSON.stringify({ dryRun }),
+      },
+    );
+  } catch {
+    // Provider sync failures should be reported in the integration card, not as a route crash.
+  }
 
   revalidatePath('/[locale]/settings', 'page');
   revalidatePath('/[locale]/campaigns', 'page');
@@ -515,8 +519,10 @@ export default async function SettingsPage({ params }: { params: Promise<{ local
                     </div>
                     {shopifySyncRuns.length ? (
                       shopifySyncRuns.slice(0, 3).map((run) => {
-                        const totals = run.outputSnapshot?.totals as
-                          Record<string, unknown> | undefined;
+                        const totals = syncRunTotals(run);
+                        const warnings = Array.isArray(run.outputSnapshot?.warnings)
+                          ? run.outputSnapshot.warnings.map(String)
+                          : [];
                         return (
                           <div className="sync-history-row" key={run.id}>
                             <div>
@@ -529,6 +535,7 @@ export default async function SettingsPage({ params }: { params: Promise<{ local
                                   dateStyle: 'medium',
                                   timeStyle: 'short',
                                 }).format(new Date(run.startedAt))}
+                                {warnings[0] ? ` - ${warnings[0]}` : ''}
                               </p>
                             </div>
                             {totals ? (
@@ -558,4 +565,24 @@ export default async function SettingsPage({ params }: { params: Promise<{ local
       </SurfaceCard>
     </div>
   );
+}
+
+function syncRunTotals(run: SyncRun) {
+  const output = run.outputSnapshot;
+  if (!output) return null;
+
+  const directTotals = ['products', 'customers', 'orders'].reduce<Record<string, unknown>>(
+    (totals, key) => {
+      const value = output[key];
+      if (typeof value === 'number') totals[key] = value;
+      return totals;
+    },
+    {},
+  );
+  if (Object.keys(directTotals).length) return directTotals;
+
+  const nestedTotals = output.totals;
+  return nestedTotals && typeof nestedTotals === 'object'
+    ? (nestedTotals as Record<string, unknown>)
+    : null;
 }

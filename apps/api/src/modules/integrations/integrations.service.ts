@@ -179,7 +179,47 @@ export class IntegrationsService {
     if (!current) throw new NotFoundException(`${provider} is not connected`);
     const dryRun = dto.dryRun ?? process.env.AUTOMATION_DRY_RUN_DEFAULT !== 'false';
     if (provider === IntegrationProvider.SHOPIFY) {
-      return this.syncShopify(current.integration.id, current.connection, dryRun);
+      try {
+        return await this.syncShopify(current.integration.id, current.connection, dryRun);
+      } catch (error) {
+        const message = integrationFailureMessage(error);
+        const run = await this.prisma.automationRun.create({
+          data: {
+            organizationId,
+            status: 'FAILED',
+            dryRun,
+            inputSnapshot: {
+              provider: IntegrationProvider.SHOPIFY,
+              type: dryRun ? 'DRY_RUN' : 'MANUAL_SYNC',
+            },
+            outputSnapshot: {
+              products: 0,
+              customers: 0,
+              orders: 0,
+              warnings: [message],
+            },
+            errorMessage: message,
+            finishedAt: new Date(),
+          },
+        });
+        await this.prisma.integration.update({
+          where: { id: current.integration.id },
+          data: {
+            status: IntegrationStatus.ERROR,
+            errorMessage: message,
+          },
+        });
+        return {
+          provider: IntegrationProvider.SHOPIFY,
+          dryRun,
+          ok: false,
+          summary:
+            'Shopify sync could not complete. Check the connection, scopes, and store permissions.',
+          counts: { products: 0, customers: 0, orders: 0 },
+          warnings: [message],
+          runId: run.id,
+        };
+      }
     }
     const result = await this.adapter(provider).sync(current.connection, dryRun);
 
@@ -1022,6 +1062,20 @@ function mapShopifyOrderStatus(order: ShopifyOrder) {
   if (order.fulfillment_status === 'fulfilled') return OrderStatus.SHIPPED;
   if (order.financial_status === 'paid' || order.confirmed) return OrderStatus.CONFIRMED;
   return OrderStatus.PENDING;
+}
+
+function integrationFailureMessage(error: unknown) {
+  const message =
+    error instanceof Error
+      ? error.message
+      : typeof error === 'string'
+        ? error
+        : 'The provider could not complete the requested sync.';
+  return message
+    .replace(/shpat_[A-Za-z0-9_:-]+/g, '[redacted]')
+    .replace(/shpss_[A-Za-z0-9_:-]+/g, '[redacted]')
+    .replace(/Bearer\s+[A-Za-z0-9._:-]+/gi, 'Bearer [redacted]')
+    .slice(0, 600);
 }
 
 async function upsertShopifyCustomer(
