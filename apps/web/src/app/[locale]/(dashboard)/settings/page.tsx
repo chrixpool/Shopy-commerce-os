@@ -539,14 +539,15 @@ export default async function SettingsPage({ params }: { params: Promise<{ local
                               </p>
                             </div>
                             {totals ? (
-                              <StatusBadge tone="info">
+                              <StatusBadge tone={run.status === 'FAILED' ? 'danger' : 'info'}>
                                 {Object.entries(totals)
-                                  .slice(0, 2)
                                   .map(([key, value]) => `${key}: ${String(value)}`)
-                                  .join(' · ')}
+                                  .join(' - ')}
                               </StatusBadge>
                             ) : (
-                              <StatusBadge tone="muted">Recorded</StatusBadge>
+                              <StatusBadge tone={run.status === 'FAILED' ? 'danger' : 'muted'}>
+                                {run.status === 'FAILED' ? 'Needs attention' : 'Recorded'}
+                              </StatusBadge>
                             )}
                           </div>
                         );
