@@ -105,7 +105,7 @@ export class FactoryService {
           },
         },
       },
-      orderBy: [{ updatedAt: 'desc' }, { name: 'asc' }],
+      orderBy: [{ orderItems: { _count: 'desc' } }, { updatedAt: 'desc' }, { name: 'asc' }],
       take: 100,
     });
   }

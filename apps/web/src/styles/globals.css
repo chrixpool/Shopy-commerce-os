@@ -59,6 +59,10 @@ body {
     sans-serif;
 }
 
+.sr-only {
+  display: none !important;
+}
+
 button,
 input,
 select,

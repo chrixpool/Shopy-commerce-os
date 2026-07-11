@@ -48,9 +48,13 @@ interface ShopifyVerification {
   scopeWarnings: string[];
   webhook: {
     active: boolean;
+    configured?: boolean;
+    endpointPath?: string;
     count: number;
     lastReceivedAt?: string | null;
     lastTopic?: string | null;
+    lastValidHmac?: boolean;
+    lastFailureReason?: string | null;
     duplicateProtection: string;
   };
   states: string[];
@@ -601,10 +605,17 @@ export default async function SettingsPage({ params }: { params: Promise<{ local
                           })}
                         </div>
                         <p className="field-help">
-                          Webhook:{' '}
+                          Webhook endpoint:{' '}
+                          {shopifyVerification.webhook.endpointPath ?? '/api/v1/webhooks/shopify'}.
+                          Secret{' '}
+                          {shopifyVerification.webhook.configured ? 'configured' : 'not configured'}
+                          . Status:{' '}
                           {shopifyVerification.webhook.active
                             ? `last ${shopifyVerification.webhook.lastTopic ?? 'event'} received ${shopifyVerification.webhook.lastReceivedAt ? new Intl.DateTimeFormat(locale, { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(shopifyVerification.webhook.lastReceivedAt)) : ''}`
-                            : 'not received yet'}
+                            : 'waiting for first live webhook'}
+                          {shopifyVerification.webhook.lastFailureReason
+                            ? `. Last failure: ${shopifyVerification.webhook.lastFailureReason}`
+                            : ''}
                           . Duplicate protection:{' '}
                           {shopifyVerification.webhook.duplicateProtection.replaceAll('_', ' ')}.
                         </p>

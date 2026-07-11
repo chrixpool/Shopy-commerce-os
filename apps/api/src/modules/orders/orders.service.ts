@@ -139,11 +139,25 @@ export class OrdersService {
       include: {
         customer: true,
         items: { include: { product: true } },
-        events: { orderBy: { createdAt: 'desc' } },
         confirmationTask: true,
         fulfillmentTask: true,
-        parcel: { include: { events: { orderBy: { timestamp: 'desc' } } } },
+        parcel: { include: { events: { orderBy: { timestamp: 'desc' }, take: 3 } } },
         costSnapshot: true,
+      },
+    });
+
+    if (!order) throw new NotFoundException('Order not found');
+    return { ...order, timeline: [] };
+  }
+
+  async getTimeline(organizationId: string, id: string) {
+    const order = await this.prisma.order.findFirst({
+      where: { id, organizationId },
+      select: {
+        id: true,
+        externalId: true,
+        events: { orderBy: { createdAt: 'desc' }, take: 25 },
+        parcel: { include: { events: { orderBy: { timestamp: 'desc' }, take: 10 } } },
       },
     });
 
@@ -208,7 +222,7 @@ export class OrdersService {
       })),
     ].sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime());
 
-    return { ...order, externalEvents, automationRuns, timeline };
+    return { externalEvents, automationRuns, timeline };
   }
 
   async addNote(organizationId: string, userId: string, id: string, note: string) {

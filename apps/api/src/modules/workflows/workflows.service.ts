@@ -7,12 +7,61 @@ import { ConfirmationAction } from './dto/update-confirmation.dto';
 export class WorkflowsService {
   constructor(private readonly prisma: PrismaService) {}
 
-  listConfirmation(organizationId: string) {
-    return this.prisma.confirmationTask.findMany({
-      where: { order: { organizationId } },
-      include: { order: { include: { customer: true } }, assignedTo: true },
-      orderBy: { updatedAt: 'desc' },
-    });
+  async listConfirmation(
+    organizationId: string,
+    query: { page?: number; limit?: number; status?: string; search?: string } = {},
+  ) {
+    const page = Math.max(Number(query.page ?? 1), 1);
+    const limit = Math.min(Math.max(Number(query.limit ?? 25), 1), 50);
+    const status =
+      query.status && query.status !== 'all' ? (query.status as ConfirmationStatus) : undefined;
+    const search = query.search?.trim();
+    const where = {
+      ...(status ? { status } : {}),
+      order: {
+        organizationId,
+        ...(search
+          ? {
+              OR: [
+                { orderNumber: { contains: search } },
+                { customerName: { contains: search } },
+                { customerPhone: { contains: search } },
+                { customer: { city: { contains: search } } },
+              ],
+            }
+          : {}),
+      },
+    };
+
+    const [data, total, summary] = await Promise.all([
+      this.prisma.confirmationTask.findMany({
+        where,
+        include: { order: { include: { customer: true } }, assignedTo: true },
+        orderBy: [{ status: 'asc' }, { updatedAt: 'desc' }],
+        skip: (page - 1) * limit,
+        take: limit,
+      }),
+      this.prisma.confirmationTask.count({ where }),
+      this.prisma.confirmationTask.groupBy({
+        by: ['status'],
+        where: { order: { organizationId } },
+        _count: { _all: true },
+      }),
+    ]);
+
+    const byStatus = summary.reduce<Record<string, number>>((acc, item) => {
+      acc[item.status] = item._count._all;
+      return acc;
+    }, {});
+
+    return {
+      data,
+      total,
+      page,
+      limit,
+      totalPages: Math.max(Math.ceil(total / limit), 1),
+      summary: byStatus,
+    };
   }
 
   async updateConfirmation(

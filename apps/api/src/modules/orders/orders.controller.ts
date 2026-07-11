@@ -59,6 +59,12 @@ export class OrdersController {
     });
   }
 
+  @Get(':id/timeline')
+  @ApiOperation({ summary: 'Get secondary order timeline data' })
+  getTimeline(@CurrentUser() user: SessionUser, @Param('id') id: string) {
+    return this.ordersService.getTimeline(user.organizationId, id);
+  }
+
   @Get(':id')
   @ApiOperation({ summary: 'Get an organization order by ID' })
   getById(@CurrentUser() user: SessionUser, @Param('id') id: string) {

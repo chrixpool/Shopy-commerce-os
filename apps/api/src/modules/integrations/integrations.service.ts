@@ -34,8 +34,8 @@ const SHOPIFY_REQUIRED_SCOPES = [
   'read_products',
   'read_customers',
   'read_inventory',
-  'read_locations',
 ];
+const SHOPIFY_OPTIONAL_SCOPES = ['read_locations'];
 const SHOPIFY_FULL_HISTORY_SCOPE = 'read_all_orders';
 
 interface ShopifyResourceSyncStats {
@@ -98,7 +98,10 @@ export class IntegrationsService {
         lastSyncAt: row?.lastSyncAt ?? null,
         errorMessage: row?.errorMessage ?? null,
         capabilities: adapter.capabilities(),
-        config: sanitizeConfig(row?.config),
+        config:
+          provider === IntegrationProvider.SHOPIFY
+            ? sanitizeShopifyConfig(row?.config)
+            : sanitizeConfig(row?.config),
       };
     });
   }
@@ -108,32 +111,37 @@ export class IntegrationsService {
   }
 
   async verifyShopify(organizationId: string) {
-    const [integration, latestRuns, localTotals, lastWebhook, webhookCount] = await Promise.all([
-      this.prisma.integration.findUnique({
-        where: {
-          organizationId_provider: { organizationId, provider: IntegrationProvider.SHOPIFY },
-        },
-      }),
-      this.syncRuns(organizationId, IntegrationProvider.SHOPIFY),
-      Promise.all([
-        this.prisma.product.count({
-          where: { organizationId, externalId: { startsWith: 'shopify-product-' } },
+    const [integration, latestRuns, localTotals, lastWebhook, lastWebhookFailure, webhookCount] =
+      await Promise.all([
+        this.prisma.integration.findUnique({
+          where: {
+            organizationId_provider: { organizationId, provider: IntegrationProvider.SHOPIFY },
+          },
         }),
-        this.prisma.customer.count({
-          where: { organizationId, externalId: { startsWith: 'shopify-customer-' } },
+        this.syncRuns(organizationId, IntegrationProvider.SHOPIFY),
+        Promise.all([
+          this.prisma.product.count({
+            where: { organizationId, externalId: { startsWith: 'shopify-product-' } },
+          }),
+          this.prisma.customer.count({
+            where: { organizationId, externalId: { startsWith: 'shopify-customer-' } },
+          }),
+          this.prisma.order.count({ where: { organizationId, source: 'shopify' } }),
+        ]),
+        this.prisma.externalEvent.findFirst({
+          where: { organizationId, provider: IntegrationProvider.SHOPIFY },
+          orderBy: { receivedAt: 'desc' },
         }),
-        this.prisma.order.count({ where: { organizationId, source: 'shopify' } }),
-      ]),
-      this.prisma.externalEvent.findFirst({
-        where: { organizationId, provider: IntegrationProvider.SHOPIFY },
-        orderBy: { receivedAt: 'desc' },
-      }),
-      this.prisma.externalEvent.count({
-        where: { organizationId, provider: IntegrationProvider.SHOPIFY },
-      }),
-    ]);
+        this.prisma.externalEvent.findFirst({
+          where: { organizationId, provider: IntegrationProvider.SHOPIFY, status: 'FAILED' },
+          orderBy: { receivedAt: 'desc' },
+        }),
+        this.prisma.externalEvent.count({
+          where: { organizationId, provider: IntegrationProvider.SHOPIFY },
+        }),
+      ]);
 
-    const config = sanitizeConfig(integration?.config);
+    const config = sanitizeShopifyConfig(integration?.config);
     const lastSuccessfulSync = latestRuns.find((run) => run.status === 'SUCCESS' && !run.dryRun);
     const lastFailedSync = latestRuns.find((run) => run.status === 'FAILED');
     const latestOutput = asRecord(lastSuccessfulSync?.outputSnapshot);
@@ -153,9 +161,10 @@ export class IntegrationsService {
         local: value,
         latestSyncFound: totals[key]?.found ?? null,
       }));
-    const scopeWarnings = Array.isArray(config.scopeWarnings)
-      ? config.scopeWarnings.map(String)
-      : [];
+    const scopeReport = shopifyScopeReport(
+      Array.isArray(config.scopes) ? config.scopes.map(String) : [],
+    );
+    const scopeWarnings = shopifyOperatorScopeWarnings(scopeReport);
     const syncRange = asRecord(latestOutput.syncRange);
     const webhookActive = Boolean(lastWebhook);
     const states = [
@@ -170,6 +179,7 @@ export class IntegrationsService {
       connectedShop: config.shopDomain ?? null,
       status: integration?.status ?? IntegrationStatus.DISCONNECTED,
       connectionMethod: config.connectionMethod ?? null,
+      scopeReport,
       lastSuccessfulSync,
       lastFailedSync,
       latestSyncTotals: totals,
@@ -179,9 +189,13 @@ export class IntegrationsService {
       scopeWarnings,
       webhook: {
         active: webhookActive,
+        endpointPath: '/api/v1/webhooks/shopify',
+        configured: Boolean(process.env.SHOPIFY_WEBHOOK_SECRET),
         count: webhookCount,
         lastReceivedAt: lastWebhook?.receivedAt ?? null,
         lastTopic: lastWebhook?.eventType ?? null,
+        lastValidHmac: lastWebhook?.status !== 'FAILED',
+        lastFailureReason: lastWebhookFailure?.errorMessage ?? null,
         duplicateProtection: 'enabled_by_provider_topic_payload_hash',
       },
       states,
@@ -769,11 +783,33 @@ export class IntegrationsService {
               .filter(Boolean)
           : [],
       };
+      const itemCreates = await Promise.all(
+        lineItems.map(async (item) => {
+          const product = await findShopifyProductForLineItem(this.prisma, organizationId, item);
+          return {
+            productId: product?.id,
+            name: item.name || item.title || 'Shopify item',
+            sku: item.sku || product?.sku || undefined,
+            quantity: Number(item.quantity ?? 1),
+            unitPrice: decimalFromString(item.price, 0),
+            total: decimalFromString(
+              String(Number(item.price ?? 0) * Number(item.quantity ?? 1)),
+              0,
+            ),
+          };
+        }),
+      );
 
       if (existingOrder) {
         await this.prisma.order.update({
           where: { id: existingOrder.id },
-          data: orderData,
+          data: {
+            ...orderData,
+            items: {
+              deleteMany: {},
+              create: itemCreates,
+            },
+          },
         });
         stats.orders.updated += 1;
       } else {
@@ -783,16 +819,7 @@ export class IntegrationsService {
             externalId: `shopify-order-${order.id}`,
             ...orderData,
             items: {
-              create: lineItems.map((item) => ({
-                name: item.name || item.title || 'Shopify item',
-                sku: item.sku || undefined,
-                quantity: Number(item.quantity ?? 1),
-                unitPrice: decimalFromString(item.price, 0),
-                total: decimalFromString(
-                  String(Number(item.price ?? 0) * Number(item.quantity ?? 1)),
-                  0,
-                ),
-              })),
+              create: itemCreates,
             },
             events: {
               create: {
@@ -826,8 +853,13 @@ export class IntegrationsService {
     }
 
     const raw = rawBody?.toString('utf8') ?? JSON.stringify(payload ?? {});
+    const secret = process.env.SHOPIFY_WEBHOOK_SECRET;
+    const signature = headers['x-shopify-hmac-sha256'];
+    const verified = secret
+      ? signature === createHmac('sha256', secret).update(raw, 'utf8').digest('base64')
+      : false;
     const payloadHash = createHash('sha256').update(raw).digest('hex');
-    await this.prisma.externalEvent.upsert({
+    const existing = await this.prisma.externalEvent.findUnique({
       where: {
         organizationId_provider_eventType_payloadHash: {
           organizationId,
@@ -836,30 +868,46 @@ export class IntegrationsService {
           payloadHash,
         },
       },
-      update: {},
-      create: {
+    });
+
+    if (existing) {
+      return {
+        ok: true,
+        verified,
+        duplicate: true,
+        dryRun: true,
+        message: 'Duplicate Shopify webhook ignored.',
+      };
+    }
+
+    await this.prisma.externalEvent.create({
+      data: {
         organizationId,
         provider: IntegrationProvider.SHOPIFY,
         eventType: topic,
         externalId: shopDomain,
         payloadHash,
-        status: 'RECEIVED',
+        status: verified ? 'RECEIVED' : 'FAILED',
+        errorMessage: verified
+          ? null
+          : secret
+            ? 'Invalid Shopify webhook signature.'
+            : 'Webhook secret is not configured.',
       },
     });
 
-    const secret = process.env.SHOPIFY_WEBHOOK_SECRET;
-    const signature = headers['x-shopify-hmac-sha256'];
-    const verified = secret
-      ? signature === createHmac('sha256', secret).update(raw, 'utf8').digest('base64')
-      : false;
+    if (!verified) {
+      throw new BadRequestException(
+        secret ? 'Invalid Shopify webhook signature.' : 'Shopify webhook secret is not configured.',
+      );
+    }
 
     return {
       ok: true,
       verified,
+      duplicate: false,
       dryRun: true,
-      message: verified
-        ? 'Shopify webhook recorded. Processing remains dry-run in this phase.'
-        : 'Shopify webhook recorded without verified signature. Set SHOPIFY_WEBHOOK_SECRET to verify.',
+      message: 'Shopify webhook verified and recorded. Processing remains dry-run in this phase.',
     };
   }
 
@@ -974,6 +1022,17 @@ function sanitizeConfig(value: unknown) {
   return Object.fromEntries(
     Object.entries(config).filter(([key]) => !key.toLowerCase().includes('token')),
   );
+}
+
+function sanitizeShopifyConfig(value: unknown): Record<string, unknown> {
+  const config = sanitizeConfig(value);
+  const scopes = Array.isArray(config.scopes) ? config.scopes.map(String) : [];
+  const scopeReport = shopifyScopeReport(scopes);
+  return {
+    ...config,
+    scopeReport,
+    scopeWarnings: shopifyOperatorScopeWarnings(scopeReport),
+  };
 }
 
 function providerConfig(provider: IntegrationProvider, dto: ConnectIntegrationDto) {
@@ -1223,11 +1282,14 @@ function shopifyScopeReport(scopes: string[]) {
     };
   };
   const required = SHOPIFY_REQUIRED_SCOPES.map(satisfies);
+  const optional = SHOPIFY_OPTIONAL_SCOPES.map(satisfies);
   const historicalOrders = satisfies(SHOPIFY_FULL_HISTORY_SCOPE);
   return {
     granted,
     required,
+    optional,
     missingRequired: required.filter((item) => !item.satisfied).map((item) => item.scope),
+    missingOptional: optional.filter((item) => !item.satisfied).map((item) => item.scope),
     broaderGranted: required
       .filter((item) => item.broaderGrant)
       .map((item) => `${item.scope} satisfied by ${item.satisfiedBy}`),
@@ -1237,14 +1299,11 @@ function shopifyScopeReport(scopes: string[]) {
 
 function shopifyScopeWarnings(scopes: string[]) {
   const report = shopifyScopeReport(scopes);
-  return [
-    ...report.missingRequired.map((scope) => `Required Shopify scope missing: ${scope}.`),
-    ...(report.historicalOrders.satisfied
-      ? []
-      : [
-          `Optional Shopify scope missing for full historical orders: ${SHOPIFY_FULL_HISTORY_SCOPE}.`,
-        ]),
-  ];
+  return shopifyOperatorScopeWarnings(report);
+}
+
+function shopifyOperatorScopeWarnings(report: ReturnType<typeof shopifyScopeReport>) {
+  return [...report.missingRequired.map((scope) => `Required Shopify scope missing: ${scope}.`)];
 }
 
 function resourceStats(found: number): ShopifyResourceSyncStats {
@@ -1389,6 +1448,28 @@ async function shopifyCustomerExists(
   return Boolean(existing);
 }
 
+async function findShopifyProductForLineItem(
+  prisma: PrismaService,
+  organizationId: string,
+  item: ShopifyOrderLineItem,
+) {
+  const productExternalId = item.product_id ? `shopify-product-${item.product_id}` : null;
+  if (productExternalId) {
+    const product = await prisma.product.findUnique({
+      where: { organizationId_externalId: { organizationId, externalId: productExternalId } },
+      select: { id: true, sku: true },
+    });
+    if (product) return product;
+  }
+
+  const sku = item.sku?.trim();
+  if (!sku) return null;
+  return prisma.product.findFirst({
+    where: { organizationId, sku },
+    select: { id: true, sku: true },
+  });
+}
+
 interface ShopifyProductsResponse {
   products?: ShopifyProduct[];
 }
@@ -1450,11 +1531,16 @@ interface ShopifyOrder {
   customer?: ShopifyCustomer;
   shipping_address?: ShopifyAddress;
   total_shipping_price_set?: { shop_money?: { amount?: string } };
-  line_items?: Array<{
-    name?: string;
-    title?: string;
-    sku?: string;
-    quantity?: number;
-    price?: string;
-  }>;
+  line_items?: ShopifyOrderLineItem[];
+}
+
+interface ShopifyOrderLineItem {
+  id?: number | string;
+  product_id?: number | string;
+  variant_id?: number | string;
+  name?: string;
+  title?: string;
+  sku?: string;
+  quantity?: number;
+  price?: string;
 }

@@ -1,5 +1,5 @@
 import Link from 'next/link';
-import type { ReactNode } from 'react';
+import { Suspense, type ReactNode } from 'react';
 import { revalidatePath } from 'next/cache';
 import { notFound } from 'next/navigation';
 import { MetricCard, PageHeader, StatusBadge, SurfaceCard } from '@/components/ui/page';
@@ -80,6 +80,10 @@ interface ControlOrder {
     title: string;
     timestamp: string;
   }>;
+}
+
+interface OrderTimeline {
+  timeline: ControlOrder['timeline'];
 }
 
 function digits(phone: string) {
@@ -346,7 +350,10 @@ export default async function OrderControlCenterPage({
                         {item.product.stock}
                       </StatusBadge>
                     ) : (
-                      <StatusBadge tone="warning">Unlinked</StatusBadge>
+                      <div>
+                        <StatusBadge tone="warning">Unlinked</StatusBadge>
+                        <p className="field-help">Review Shopify product or SKU mapping.</p>
+                      </div>
                     )}
                   </td>
                 </tr>
@@ -532,15 +539,20 @@ export default async function OrderControlCenterPage({
                 </div>
               </div>
             ) : null}
-            {order.timeline.length === 0 ? (
+            {order.costSnapshot &&
+            order.parcel?.status !== 'FAILED_ATTEMPT' &&
+            order.parcel?.status !== 'RETURNED' ? (
               <p className="field-help">No alerts right now.</p>
             ) : null}
           </div>
         </SurfaceCard>
       </section>
 
-      <SurfaceCard>
-        <h2 className="section-title">Event timeline</h2>
+      <Suspense fallback={<TimelineSkeleton />}>
+        <OrderTimelineSection orderId={order.id} locale={locale} />
+      </Suspense>
+      <SurfaceCard className="sr-only">
+        <h2 className="section-title">Legacy timeline</h2>
         <div className="timeline-list">
           {order.timeline.length ? (
             order.timeline.map((event) => (
@@ -561,6 +573,47 @@ export default async function OrderControlCenterPage({
         </div>
       </SurfaceCard>
     </div>
+  );
+}
+
+async function OrderTimelineSection({ orderId, locale }: { orderId: string; locale: string }) {
+  const data = await apiFetch<OrderTimeline>(`/api/v1/orders/${orderId}/timeline`);
+
+  return (
+    <SurfaceCard>
+      <h2 className="section-title">Event timeline</h2>
+      <div className="timeline-list">
+        {data.timeline.length ? (
+          data.timeline.map((event) => (
+            <div className="step-item" key={event.id}>
+              <span className="step-number">{event.source.slice(0, 2).toUpperCase()}</span>
+              <div>
+                <p className="step-title">{event.title}</p>
+                <p className="step-copy">
+                  {event.source} · {event.type.replace(/_/g, ' ')} ·{' '}
+                  {formatDate(event.timestamp, locale)}
+                </p>
+              </div>
+            </div>
+          ))
+        ) : (
+          <p className="field-help">No events recorded yet.</p>
+        )}
+      </div>
+    </SurfaceCard>
+  );
+}
+
+function TimelineSkeleton() {
+  return (
+    <SurfaceCard>
+      <h2 className="section-title">Event timeline</h2>
+      <div className="skeleton-table" aria-hidden="true">
+        <span className="skeleton-line" />
+        <span className="skeleton-line" />
+        <span className="skeleton-line skeleton-short" />
+      </div>
+    </SurfaceCard>
   );
 }
 
