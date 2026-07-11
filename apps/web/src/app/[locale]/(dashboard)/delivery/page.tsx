@@ -1,3 +1,4 @@
+import Link from 'next/link';
 import { revalidatePath } from 'next/cache';
 import { EmptyState, MetricCard, PageHeader } from '@/components/ui/page';
 import { apiFetch, getWorkspaceSettings } from '@/lib/api';
@@ -10,6 +11,7 @@ interface ParcelRecord {
   status: string;
   codCollected: boolean;
   order: {
+    id: string;
     orderNumber: string;
     customerName: string;
     customerPhone: string;
@@ -120,7 +122,9 @@ export default async function DeliveryPage({ params }: { params: Promise<{ local
                 <tr key={parcel.id}>
                   <td>
                     <div className="strong-cell">
-                      {parcel.trackingNumber ?? parcel.order.orderNumber}
+                      <Link href={`/${locale}/orders/${parcel.order.id}`}>
+                        {parcel.trackingNumber ?? parcel.order.orderNumber}
+                      </Link>
                     </div>
                     <div>{parcel.provider}</div>
                   </td>

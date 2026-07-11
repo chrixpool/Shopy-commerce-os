@@ -29,6 +29,11 @@ export class IntegrationsController {
     return this.integrationsService.list(user.organizationId);
   }
 
+  @Get('integrations/shopify/verification')
+  verifyShopify(@CurrentUser() user: SessionUser) {
+    return this.integrationsService.verifyShopify(user.organizationId);
+  }
+
   @Get('integrations/:provider')
   get(@CurrentUser() user: SessionUser, @Param('provider') provider: string) {
     return this.integrationsService.get(user.organizationId, parseProvider(provider));

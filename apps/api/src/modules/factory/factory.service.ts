@@ -298,26 +298,37 @@ export class FactoryService {
     );
     const revenue = Number(order.totalAmount);
     const grossMargin = revenue - productCostTotal;
-    return this.prisma.orderCostSnapshot.upsert({
-      where: { orderId: order.id },
-      update: {
-        productCostTotal,
-        totalCost: productCostTotal,
-        revenue,
-        grossMargin,
-        grossMarginPercent: revenue > 0 ? grossMargin / revenue : 0,
-        calculatedAt: new Date(),
-      },
-      create: {
-        organizationId,
-        orderId: order.id,
-        productCostTotal,
-        totalCost: productCostTotal,
-        revenue,
-        grossMargin,
-        grossMarginPercent: revenue > 0 ? grossMargin / revenue : 0,
-        currency: organization?.baseCurrency ?? 'USD',
-      },
+    return this.prisma.$transaction(async (tx) => {
+      const snapshot = await tx.orderCostSnapshot.upsert({
+        where: { orderId: order.id },
+        update: {
+          productCostTotal,
+          totalCost: productCostTotal,
+          revenue,
+          grossMargin,
+          grossMarginPercent: revenue > 0 ? grossMargin / revenue : 0,
+          calculatedAt: new Date(),
+        },
+        create: {
+          organizationId,
+          orderId: order.id,
+          productCostTotal,
+          totalCost: productCostTotal,
+          revenue,
+          grossMargin,
+          grossMarginPercent: revenue > 0 ? grossMargin / revenue : 0,
+          currency: organization?.baseCurrency ?? 'USD',
+        },
+      });
+      await tx.orderEvent.create({
+        data: {
+          orderId: order.id,
+          type: 'cost_recalculated',
+          note: 'Order cost and margin recalculated',
+          data: { totalCost: productCostTotal, revenue, grossMargin },
+        },
+      });
+      return snapshot;
     });
   }
 

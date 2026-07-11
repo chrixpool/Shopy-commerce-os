@@ -34,6 +34,28 @@ interface SyncRun {
   errorMessage?: string | null;
 }
 
+interface ShopifyVerification {
+  connectedShop?: string | null;
+  status: string;
+  connectionMethod?: string | null;
+  latestSyncTotals: Record<
+    string,
+    { found: number; created: number; updated: number; skipped: number; failed: number }
+  >;
+  localImportedTotals: Record<string, number>;
+  mismatches: Array<{ resource: string; local: number; latestSyncFound: number | null }>;
+  syncRange?: Record<string, unknown>;
+  scopeWarnings: string[];
+  webhook: {
+    active: boolean;
+    count: number;
+    lastReceivedAt?: string | null;
+    lastTopic?: string | null;
+    duplicateProtection: string;
+  };
+  states: string[];
+}
+
 const FALLBACK_INTEGRATIONS: Integration[] = [
   { provider: 'CSV', label: 'CSV import', status: 'CONNECTED', mode: 'READ_ONLY' },
   { provider: 'MANUAL', label: 'Manual workflows', status: 'CONNECTED', mode: 'APPROVAL_REQUIRED' },
@@ -145,10 +167,15 @@ async function disconnectIntegration(formData: FormData) {
 
 export default async function SettingsPage({ params }: { params: Promise<{ locale: string }> }) {
   const { locale } = await params;
-  const [organization, integrations, shopifySyncRuns] = await Promise.all([
+  const [organization, integrations, shopifySyncRuns, shopifyVerification] = await Promise.all([
     apiFetch<Organization>('/api/v1/settings/organization'),
     optionalApiFetch<Integration[]>('/api/v1/integrations', FALLBACK_INTEGRATIONS),
     optionalApiFetch<SyncRun[]>('/api/v1/integrations/shopify/sync-runs', [], 1200),
+    optionalApiFetch<ShopifyVerification | null>(
+      '/api/v1/integrations/shopify/verification',
+      null,
+      1200,
+    ),
   ]);
   const connectedCount = integrations.filter(
     (integration) => integration.status === 'CONNECTED',
@@ -529,6 +556,71 @@ export default async function SettingsPage({ params }: { params: Promise<{ local
                 </p>
                 {integration.provider === 'SHOPIFY' ? (
                   <div className="sync-history" aria-label="Shopify sync history">
+                    {shopifyVerification ? (
+                      <div className="card card-padded" style={{ marginBottom: 14 }}>
+                        <div className="queue-card-header">
+                          <div>
+                            <p className="queue-title">Verification</p>
+                            <p className="queue-meta">
+                              Local imports compared with the latest successful sync.
+                            </p>
+                          </div>
+                          <div className="actions-row">
+                            <form>
+                              <button className="button button-secondary" type="submit">
+                                Verify Shopify data
+                              </button>
+                            </form>
+                            <StatusBadge
+                              tone={
+                                shopifyVerification.mismatches.length ||
+                                shopifyVerification.scopeWarnings.length
+                                  ? 'warning'
+                                  : shopifyVerification.webhook.active
+                                    ? 'success'
+                                    : 'info'
+                              }
+                            >
+                              {shopifyVerification.states.join(', ').replaceAll('_', ' ')}
+                            </StatusBadge>
+                          </div>
+                        </div>
+                        <div className="stats-grid" style={{ marginTop: 14 }}>
+                          {['products', 'customers', 'orders'].map((key) => {
+                            const totals = shopifyVerification.latestSyncTotals[key];
+                            return (
+                              <MetricCard
+                                key={key}
+                                label={key}
+                                value={String(shopifyVerification.localImportedTotals[key] ?? 0)}
+                                help={`${totals?.found ?? 0} found, ${totals?.created ?? 0} created, ${totals?.updated ?? 0} updated, ${totals?.failed ?? 0} failed in latest sync.`}
+                                badge="Local"
+                                badgeTone="info"
+                              />
+                            );
+                          })}
+                        </div>
+                        <p className="field-help">
+                          Webhook:{' '}
+                          {shopifyVerification.webhook.active
+                            ? `last ${shopifyVerification.webhook.lastTopic ?? 'event'} received ${shopifyVerification.webhook.lastReceivedAt ? new Intl.DateTimeFormat(locale, { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(shopifyVerification.webhook.lastReceivedAt)) : ''}`
+                            : 'not received yet'}
+                          . Duplicate protection:{' '}
+                          {shopifyVerification.webhook.duplicateProtection.replaceAll('_', ' ')}.
+                        </p>
+                        {shopifyVerification.mismatches.length ? (
+                          <p className="field-help">
+                            Mismatch:{' '}
+                            {shopifyVerification.mismatches
+                              .map(
+                                (item) =>
+                                  `${item.resource} local ${item.local} / sync found ${item.latestSyncFound}`,
+                              )
+                              .join(', ')}
+                          </p>
+                        ) : null}
+                      </div>
+                    ) : null}
                     <div className="queue-card-header">
                       <div>
                         <p className="queue-title">Sync history</p>

@@ -138,7 +138,7 @@ export class OrdersService {
       where: { id, organizationId },
       include: {
         customer: true,
-        items: true,
+        items: { include: { product: true } },
         events: { orderBy: { createdAt: 'desc' } },
         confirmationTask: true,
         fulfillmentTask: true,
@@ -148,7 +148,89 @@ export class OrdersService {
     });
 
     if (!order) throw new NotFoundException('Order not found');
-    return order;
+
+    const [externalEvents, automationRuns] = await Promise.all([
+      order.externalId
+        ? this.prisma.externalEvent.findMany({
+            where: {
+              organizationId,
+              provider: 'SHOPIFY',
+              OR: [
+                { externalId: order.externalId },
+                { externalId: { contains: order.externalId } },
+              ],
+            },
+            orderBy: { receivedAt: 'desc' },
+            take: 10,
+          })
+        : [],
+      this.prisma.automationRun.findMany({
+        where: {
+          organizationId,
+          OR: [
+            { inputSnapshot: { path: ['orderId'], equals: order.id } },
+            { outputSnapshot: { path: ['orderId'], equals: order.id } },
+          ],
+        },
+        orderBy: { startedAt: 'desc' },
+        take: 10,
+      }),
+    ]);
+
+    const timeline = [
+      ...order.events.map((event) => ({
+        id: `order-${event.id}`,
+        source: 'Order',
+        type: event.type,
+        title: event.note ?? event.type.replace(/_/g, ' '),
+        timestamp: event.createdAt,
+      })),
+      ...(order.parcel?.events ?? []).map((event) => ({
+        id: `parcel-${event.id}`,
+        source: 'Delivery',
+        type: 'parcel_event',
+        title: event.note ?? event.status.replace(/_/g, ' '),
+        timestamp: event.timestamp,
+      })),
+      ...externalEvents.map((event) => ({
+        id: `external-${event.id}`,
+        source: 'Shopify',
+        type: event.eventType,
+        title: `Webhook ${event.eventType}`,
+        timestamp: event.receivedAt,
+      })),
+      ...automationRuns.map((run) => ({
+        id: `automation-${run.id}`,
+        source: 'Automation',
+        type: 'automation_run',
+        title: `Automation run ${run.status.toLowerCase()}`,
+        timestamp: run.startedAt,
+      })),
+    ].sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime());
+
+    return { ...order, externalEvents, automationRuns, timeline };
+  }
+
+  async addNote(organizationId: string, userId: string, id: string, note: string) {
+    const cleanNote = note.trim();
+    if (!cleanNote) throw new BadRequestException('Note is required');
+
+    const order = await this.prisma.order.findFirst({
+      where: { id, organizationId },
+      select: { id: true },
+    });
+    if (!order) throw new NotFoundException('Order not found');
+
+    await this.prisma.orderEvent.create({
+      data: {
+        orderId: id,
+        type: 'internal_note',
+        userId,
+        note: cleanNote.slice(0, 1000),
+      },
+    });
+
+    return this.getById(organizationId, id);
   }
 
   async create(organizationId: string, userId: string, dto: CreateOrderDto) {

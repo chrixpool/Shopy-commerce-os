@@ -40,6 +40,16 @@ const GUIDES = [
   },
 ];
 
+const BETA_CHECKLIST = [
+  'Connect Shopify and verify totals',
+  'Run Shopify sync twice and confirm duplicates do not increase',
+  'Open one imported order in Order Control Center',
+  'Confirm, pack, dispatch, and close one test workflow',
+  'Assign product costs and recalculate margin',
+  'Check webhook activity and Activity timeline',
+  'Review the mobile workflow before handing to operators',
+];
+
 export default async function HelpPage({ params }: { params: Promise<{ locale: string }> }) {
   const { locale } = await params;
 
@@ -81,6 +91,29 @@ export default async function HelpPage({ params }: { params: Promise<{ locale: s
             </p>
           </div>
           <StatusBadge tone="success">Approval-gated</StatusBadge>
+        </div>
+      </SurfaceCard>
+
+      <SurfaceCard>
+        <div className="section-header">
+          <div>
+            <h2 className="section-title">Operator beta checklist</h2>
+            <p className="section-description">
+              Use this checklist before inviting a real team into the workspace.
+            </p>
+          </div>
+          <StatusBadge tone="info">Beta readiness</StatusBadge>
+        </div>
+        <div className="step-list" style={{ marginTop: 18 }}>
+          {BETA_CHECKLIST.map((item, index) => (
+            <div className="step-item" key={item}>
+              <span className="step-number">{index + 1}</span>
+              <div>
+                <p className="step-title">{item}</p>
+                <p className="step-copy">Complete and verify before scaling daily operations.</p>
+              </div>
+            </div>
+          ))}
         </div>
       </SurfaceCard>
     </div>

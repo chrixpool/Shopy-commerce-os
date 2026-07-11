@@ -1,3 +1,4 @@
+import Link from 'next/link';
 import { revalidatePath } from 'next/cache';
 import { EmptyState, MetricCard, PageHeader } from '@/components/ui/page';
 import { apiFetch, getWorkspaceSettings } from '@/lib/api';
@@ -8,11 +9,13 @@ interface ConfirmationTask {
   status: string;
   attempts: number;
   order: {
+    id: string;
     orderNumber: string;
     customerName: string;
     customerPhone: string;
     status: string;
     totalAmount: string | number;
+    createdAt: string;
     customer?: {
       city?: string | null;
       address?: string | null;
@@ -38,6 +41,13 @@ async function updateConfirmation(formData: FormData) {
 
 function digits(phone: string) {
   return phone.replace(/\D/g, '');
+}
+
+function ageLabel(value: string) {
+  const hours = Math.max(Math.floor((Date.now() - new Date(value).getTime()) / 36e5), 0);
+  if (hours < 1) return 'New';
+  if (hours < 24) return `${hours}h waiting`;
+  return `${Math.floor(hours / 24)}d waiting`;
 }
 
 export default async function ConfirmationPage({
@@ -118,7 +128,12 @@ export default async function ConfirmationPage({
             <tbody>
               {tasks.map((task) => (
                 <tr key={task.id}>
-                  <td className="strong-cell">{task.order.orderNumber}</td>
+                  <td className="strong-cell">
+                    <Link href={`/${locale}/orders/${task.order.id}`}>
+                      {task.order.orderNumber}
+                    </Link>
+                    <div className="field-help">{ageLabel(task.order.createdAt)}</div>
+                  </td>
                   <td>
                     <div className="strong-cell">{task.order.customerName}</div>
                     <div>{task.order.customerPhone}</div>

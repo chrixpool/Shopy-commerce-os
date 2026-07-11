@@ -1,3 +1,4 @@
+import Link from 'next/link';
 import { revalidatePath } from 'next/cache';
 import { EmptyState, MetricCard, PageHeader } from '@/components/ui/page';
 import { apiFetch, getWorkspaceSettings } from '@/lib/api';
@@ -8,6 +9,7 @@ interface FulfillmentTask {
   status: string;
   packedAt?: string | null;
   order: {
+    id: string;
     orderNumber: string;
     customerName: string;
     customerPhone: string;
@@ -115,7 +117,11 @@ export default async function FulfillmentPage({ params }: { params: Promise<{ lo
             <tbody>
               {tasks.map((task) => (
                 <tr key={task.id}>
-                  <td className="strong-cell">{task.order.orderNumber}</td>
+                  <td className="strong-cell">
+                    <Link href={`/${locale}/orders/${task.order.id}`}>
+                      {task.order.orderNumber}
+                    </Link>
+                  </td>
                   <td>
                     <div className="strong-cell">{task.order.customerName}</div>
                     <div>{task.order.customerPhone}</div>

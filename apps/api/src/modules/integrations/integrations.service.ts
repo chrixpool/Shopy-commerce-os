@@ -107,6 +107,87 @@ export class IntegrationsService {
     return (await this.list(organizationId)).find((item) => item.provider === provider);
   }
 
+  async verifyShopify(organizationId: string) {
+    const [integration, latestRuns, localTotals, lastWebhook, webhookCount] = await Promise.all([
+      this.prisma.integration.findUnique({
+        where: {
+          organizationId_provider: { organizationId, provider: IntegrationProvider.SHOPIFY },
+        },
+      }),
+      this.syncRuns(organizationId, IntegrationProvider.SHOPIFY),
+      Promise.all([
+        this.prisma.product.count({
+          where: { organizationId, externalId: { startsWith: 'shopify-product-' } },
+        }),
+        this.prisma.customer.count({
+          where: { organizationId, externalId: { startsWith: 'shopify-customer-' } },
+        }),
+        this.prisma.order.count({ where: { organizationId, source: 'shopify' } }),
+      ]),
+      this.prisma.externalEvent.findFirst({
+        where: { organizationId, provider: IntegrationProvider.SHOPIFY },
+        orderBy: { receivedAt: 'desc' },
+      }),
+      this.prisma.externalEvent.count({
+        where: { organizationId, provider: IntegrationProvider.SHOPIFY },
+      }),
+    ]);
+
+    const config = sanitizeConfig(integration?.config);
+    const lastSuccessfulSync = latestRuns.find((run) => run.status === 'SUCCESS' && !run.dryRun);
+    const lastFailedSync = latestRuns.find((run) => run.status === 'FAILED');
+    const latestOutput = asRecord(lastSuccessfulSync?.outputSnapshot);
+    const totals = syncOutputTotals(latestOutput);
+    const local = {
+      products: localTotals[0],
+      customers: localTotals[1],
+      orders: localTotals[2],
+    };
+    const mismatches = Object.entries(local)
+      .filter(([key, value]) => {
+        const found = totals[key]?.found;
+        return typeof found === 'number' && value < found;
+      })
+      .map(([key, value]) => ({
+        resource: key,
+        local: value,
+        latestSyncFound: totals[key]?.found ?? null,
+      }));
+    const scopeWarnings = Array.isArray(config.scopeWarnings)
+      ? config.scopeWarnings.map(String)
+      : [];
+    const syncRange = asRecord(latestOutput.syncRange);
+    const webhookActive = Boolean(lastWebhook);
+    const states = [
+      integration?.status === IntegrationStatus.CONNECTED ? 'connected' : 'not_connected',
+      mismatches.length ? 'mismatch_found' : 'verified',
+      syncRange.mode === 'shopify_recent_window' ? 'incomplete_historical_range' : null,
+      webhookActive ? null : 'webhook_inactive',
+      scopeWarnings.length ? 'scope_issue' : null,
+    ].filter(Boolean);
+
+    return {
+      connectedShop: config.shopDomain ?? null,
+      status: integration?.status ?? IntegrationStatus.DISCONNECTED,
+      connectionMethod: config.connectionMethod ?? null,
+      lastSuccessfulSync,
+      lastFailedSync,
+      latestSyncTotals: totals,
+      localImportedTotals: local,
+      mismatches,
+      syncRange,
+      scopeWarnings,
+      webhook: {
+        active: webhookActive,
+        count: webhookCount,
+        lastReceivedAt: lastWebhook?.receivedAt ?? null,
+        lastTopic: lastWebhook?.eventType ?? null,
+        duplicateProtection: 'enabled_by_provider_topic_payload_hash',
+      },
+      states,
+    };
+  }
+
   async connect(organizationId: string, provider: IntegrationProvider, dto: ConnectIntegrationDto) {
     const adapter = this.adapter(provider);
     const existing = await this.prisma.integration.findUnique({
@@ -1214,6 +1295,26 @@ function shopifySyncOutput(input: {
     finishedAt: input.finishedAt.toISOString(),
     status: input.warnings.length ? 'success_with_warnings' : 'success',
   };
+}
+
+function syncOutputTotals(output: Record<string, unknown>) {
+  return ['products', 'customers', 'orders'].reduce<
+    Record<
+      string,
+      { found: number; created: number; updated: number; skipped: number; failed: number }
+    >
+  >((totals, key) => {
+    const resource = asRecord(output[key]);
+    const nestedTotals = asRecord(output.totals);
+    totals[key] = {
+      found: Number(resource.found ?? nestedTotals[key] ?? 0),
+      created: Number(resource.created ?? 0),
+      updated: Number(resource.updated ?? 0),
+      skipped: Number(resource.skipped ?? 0),
+      failed: Number(resource.failed ?? 0),
+    };
+    return totals;
+  }, {});
 }
 
 function decimalFromString(value: unknown, fallback: number) {

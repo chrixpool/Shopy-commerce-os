@@ -86,4 +86,14 @@ export class OrdersController {
   ) {
     return this.ordersService.updateStatus(user.organizationId, user.id, id, dto.status);
   }
+
+  @Post(':id/notes')
+  @ApiOperation({ summary: 'Add an internal order note' })
+  addNote(
+    @CurrentUser() user: SessionUser,
+    @Param('id') id: string,
+    @Body() dto: { note?: string },
+  ) {
+    return this.ordersService.addNote(user.organizationId, user.id, id, dto.note ?? '');
+  }
 }

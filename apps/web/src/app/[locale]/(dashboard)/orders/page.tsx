@@ -304,7 +304,9 @@ export default async function OrdersPage({
             <tbody>
               {orders.data.map((order) => (
                 <tr key={order.id}>
-                  <td className="strong-cell">{order.orderNumber}</td>
+                  <td className="strong-cell">
+                    <Link href={`/${locale}/orders/${order.id}`}>{order.orderNumber}</Link>
+                  </td>
                   <td>
                     <div className="strong-cell">{order.customerName}</div>
                     <div>{order.customerPhone}</div>
