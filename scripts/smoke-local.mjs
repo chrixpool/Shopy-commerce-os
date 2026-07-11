@@ -53,6 +53,9 @@ function sessionHeaders(user) {
 }
 
 const results = [];
+const smokeId = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+let smokeOrderId = null;
+let smokeAutomationId = null;
 
 const health = await request(`${apiUrl}/api/v1/health`);
 assert(health.body?.status === 'ok', 'API health did not return ok');
@@ -81,14 +84,17 @@ const created = await request(`${apiUrl}/api/v1/orders`, {
   method: 'POST',
   headers,
   body: JSON.stringify({
+    source: 'smoke',
     customerName: 'Smoke Test Customer',
     customerPhone: smokePhone,
     city: 'Local',
-    address: 'Smoke check',
+    address: 'Isolated smoke check',
+    notes: `SMOKE:${smokeId}`,
     items: [{ name: 'Smoke Test Product', quantity: 1, unitPrice: 10 }],
   }),
 });
 assert(created.body?.id, 'Order create did not return an id');
+smokeOrderId = created.body.id;
 results.push('Orders create');
 
 const updated = await request(`${apiUrl}/api/v1/orders/${created.body.id}/status`, {
@@ -115,7 +121,7 @@ const dryRunAutomation = await request(`${apiUrl}/api/v1/automations`, {
   method: 'POST',
   headers,
   body: JSON.stringify({
-    name: `Smoke dry-run automation ${Date.now()}`,
+    name: `SMOKE:${smokeId}`,
     provider: 'MANUAL',
     triggerType: 'order_created',
     actionType: 'create_draft_action',
@@ -126,6 +132,7 @@ const dryRunAutomation = await request(`${apiUrl}/api/v1/automations`, {
   }),
 });
 assert(dryRunAutomation.body?.id, 'Automation create did not return an id');
+smokeAutomationId = dryRunAutomation.body.id;
 results.push('Automation create');
 
 const automationRun = await request(`${apiUrl}/api/v1/automations/${dryRunAutomation.body.id}/test`, {
@@ -175,5 +182,19 @@ try {
 } catch (error) {
   throw new Error(`Auth sign-in path failed: ${error.message}`);
 }
+
+if (smokeAutomationId) {
+  await request(`${apiUrl}/api/v1/automations/${smokeAutomationId}/smoke`, {
+    method: 'DELETE',
+    headers,
+  });
+}
+if (smokeOrderId) {
+  await request(`${apiUrl}/api/v1/orders/${smokeOrderId}/smoke`, {
+    method: 'DELETE',
+    headers,
+  });
+}
+results.push('Smoke records cleaned');
 
 console.log(`Smoke checks passed: ${results.join(', ')}`);

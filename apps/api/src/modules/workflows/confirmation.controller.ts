@@ -30,6 +30,6 @@ export class ConfirmationController {
     @Param('id') id: string,
     @Body() dto: UpdateConfirmationDto,
   ) {
-    return this.workflowsService.updateConfirmation(user.organizationId, user.id, id, dto.action);
+    return this.workflowsService.updateConfirmation(user.organizationId, user.id, id, dto);
   }
 }

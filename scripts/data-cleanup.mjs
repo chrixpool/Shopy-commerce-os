@@ -24,7 +24,7 @@ const args = new Map(
 const execute = args.get('execute') === 'true';
 const organizationSlug =
   args.get('org') || args.get('organization') || process.env.DATA_CLEANUP_ORG;
-const deleteSources = String(process.env.DELETE_SOURCES || 'SEED,DEMO,TEST')
+const deleteSources = String(process.env.DELETE_SOURCES || 'SEED,DEMO,TEST,SMOKE')
   .split(',')
   .map((source) => source.trim().toUpperCase())
   .filter(Boolean);
@@ -53,6 +53,7 @@ function zeroCounts() {
     Product: 0,
     Customer: 0,
     AutomationRun: 0,
+    Automation: 0,
     DraftAction: 0,
     Invitation: 0,
   };
@@ -64,8 +65,13 @@ async function classify(organizationId) {
       organizationId,
       source: { not: 'shopify' },
       OR: [
+        { source: { in: deleteSources.map((source) => source.toLowerCase()) } },
         { externalId: { startsWith: 'seed-order-' } },
+        { externalId: { startsWith: 'demo-order-' } },
+        { externalId: { startsWith: 'test-order-' } },
+        { externalId: { startsWith: 'smoke-order-' } },
         { notes: 'Seed demo order' },
+        { notes: { startsWith: 'SMOKE:' } },
         { events: { some: { type: 'seeded' } } },
       ],
     },
@@ -74,7 +80,16 @@ async function classify(organizationId) {
   const seedOrderIds = seedOrders.map((order) => order.id);
 
   const seedProducts = await prisma.product.findMany({
-    where: { organizationId, externalId: { startsWith: 'seed-product-' } },
+    where: {
+      organizationId,
+      OR: [
+        { externalId: { startsWith: 'seed-product-' } },
+        { externalId: { startsWith: 'demo-product-' } },
+        { externalId: { startsWith: 'test-product-' } },
+        { externalId: { startsWith: 'smoke-product-' } },
+        { sku: { startsWith: 'SMOKE-' } },
+      ],
+    },
     select: { id: true },
   });
   const seedProductIds = seedProducts.map((product) => product.id);
@@ -84,6 +99,11 @@ async function classify(organizationId) {
     select: { id: true },
   });
   const seedParcelIds = seedParcels.map((parcel) => parcel.id);
+  const smokeAutomations = await prisma.automation.findMany({
+    where: { organizationId, name: { startsWith: 'SMOKE:' } },
+    select: { id: true },
+  });
+  const smokeAutomationIds = smokeAutomations.map((automation) => automation.id);
 
   const uncertain = {
     orders: await prisma.order.findMany({
@@ -116,11 +136,11 @@ async function classify(organizationId) {
     }),
   };
 
-  return { seedOrderIds, seedProductIds, seedParcelIds, uncertain };
+  return { seedOrderIds, seedProductIds, seedParcelIds, smokeAutomationIds, uncertain };
 }
 
 async function collectCounts(organizationId, classified) {
-  const { seedOrderIds, seedProductIds, seedParcelIds } = classified;
+  const { seedOrderIds, seedProductIds, seedParcelIds, smokeAutomationIds } = classified;
   const [
     orderCostSnapshots,
     parcelEvents,
@@ -135,6 +155,7 @@ async function collectCounts(organizationId, classified) {
     products,
     customers,
     automationRuns,
+    automations,
     draftActions,
     invitations,
   ] = await Promise.all([
@@ -159,10 +180,23 @@ async function collectCounts(organizationId, classified) {
       },
     }),
     prisma.automationRun.count({
-      where: { organizationId, inputSnapshot: { path: ['seeded'], equals: true } },
+      where: {
+        organizationId,
+        OR: [
+          { inputSnapshot: { path: ['seeded'], equals: true } },
+          { automationId: { in: smokeAutomationIds } },
+        ],
+      },
     }),
+    prisma.automation.count({ where: { id: { in: smokeAutomationIds }, organizationId } }),
     prisma.draftAction.count({
-      where: { organizationId, payload: { path: ['seeded'], equals: true } },
+      where: {
+        organizationId,
+        OR: [
+          { payload: { path: ['seeded'], equals: true } },
+          { title: { startsWith: 'SMOKE:' } },
+        ],
+      },
     }),
     prisma.invitation.count({ where: { organizationId, email: 'operator@Shopy.app' } }),
   ]);
@@ -182,13 +216,14 @@ async function collectCounts(organizationId, classified) {
     Product: products,
     Customer: customers,
     AutomationRun: automationRuns,
+    Automation: automations,
     DraftAction: draftActions,
     Invitation: invitations,
   };
 }
 
 async function executeCleanup(organizationId, classified) {
-  const { seedOrderIds, seedProductIds, seedParcelIds } = classified;
+  const { seedOrderIds, seedProductIds, seedParcelIds, smokeAutomationIds } = classified;
   return prisma.$transaction(async (tx) => {
     const deleted = zeroCounts();
     deleted.OrderCostSnapshot = (
@@ -229,13 +264,28 @@ async function executeCleanup(organizationId, classified) {
     ).count;
     deleted.AutomationRun = (
       await tx.automationRun.deleteMany({
-        where: { organizationId, inputSnapshot: { path: ['seeded'], equals: true } },
+        where: {
+          organizationId,
+          OR: [
+            { inputSnapshot: { path: ['seeded'], equals: true } },
+            { automationId: { in: smokeAutomationIds } },
+          ],
+        },
       })
     ).count;
     deleted.DraftAction = (
       await tx.draftAction.deleteMany({
-        where: { organizationId, payload: { path: ['seeded'], equals: true } },
+        where: {
+          organizationId,
+          OR: [
+            { payload: { path: ['seeded'], equals: true } },
+            { title: { startsWith: 'SMOKE:' } },
+          ],
+        },
       })
+    ).count;
+    deleted.Automation = (
+      await tx.automation.deleteMany({ where: { id: { in: smokeAutomationIds }, organizationId } })
     ).count;
     deleted.Invitation = (
       await tx.invitation.deleteMany({ where: { organizationId, email: 'operator@Shopy.app' } })
@@ -302,9 +352,9 @@ async function main() {
   if (process.env.CONFIRM_DATA_CLEANUP !== organization.slug) {
     throw new Error('Execution requires CONFIRM_DATA_CLEANUP to equal the organization slug.');
   }
-  for (const required of ['SEED', 'DEMO', 'TEST']) {
+  for (const required of ['SEED', 'DEMO', 'TEST', 'SMOKE']) {
     if (!deleteSources.includes(required)) {
-      throw new Error('Execution requires DELETE_SOURCES to include SEED,DEMO,TEST.');
+      throw new Error('Execution requires DELETE_SOURCES to include SEED,DEMO,TEST,SMOKE.');
     }
   }
   if (selectedShopifyRecords > 0) {

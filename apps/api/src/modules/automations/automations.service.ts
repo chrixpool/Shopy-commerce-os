@@ -173,4 +173,21 @@ export class AutomationsService {
       include: { automation: { select: { name: true, triggerType: true, actionType: true } } },
     });
   }
+
+  async deleteSmoke(organizationId: string, id: string) {
+    const automation = await this.prisma.automation.findFirst({
+      where: { id, organizationId, name: { startsWith: 'SMOKE:' } },
+      select: { id: true },
+    });
+    if (!automation) throw new NotFoundException('Smoke automation not found');
+
+    await this.prisma.$transaction([
+      this.prisma.draftAction.deleteMany({
+        where: { organizationId, title: { startsWith: 'SMOKE:' } },
+      }),
+      this.prisma.automationRun.deleteMany({ where: { automationId: id, organizationId } }),
+      this.prisma.automation.delete({ where: { id } }),
+    ]);
+    return { deleted: true };
+  }
 }

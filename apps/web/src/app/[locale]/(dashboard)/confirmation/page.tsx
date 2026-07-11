@@ -8,6 +8,11 @@ interface ConfirmationTask {
   id: string;
   status: string;
   attempts: number;
+  ageHours: number;
+  overdue: boolean;
+  priority: 'HIGH' | 'MEDIUM' | 'NORMAL';
+  lastAction?: string | null;
+  assignedTo?: { name?: string | null } | null;
   order: {
     id: string;
     orderNumber: string;
@@ -16,6 +21,8 @@ interface ConfirmationTask {
     status: string;
     totalAmount: string | number;
     createdAt: string;
+    source: string;
+    _count: { items: number };
     customer?: {
       city?: string | null;
       address?: string | null;
@@ -30,6 +37,14 @@ interface ConfirmationResponse {
   limit: number;
   totalPages: number;
   summary: Record<string, number>;
+  metrics: {
+    actionable: number;
+    confirmedToday: number;
+    cancelled: number;
+    averageWaitingHours: number;
+    overdueSla: number;
+    confirmationRate: number | null;
+  };
 }
 
 async function updateConfirmation(formData: FormData) {
@@ -46,6 +61,8 @@ async function updateConfirmation(formData: FormData) {
   revalidatePath('/[locale]/confirmation', 'page');
   revalidatePath('/[locale]/dashboard', 'page');
   revalidatePath('/[locale]/orders', 'page');
+  revalidatePath('/[locale]/activity', 'page');
+  revalidatePath('/[locale]/finance', 'page');
 }
 
 function digits(phone: string) {
@@ -69,7 +86,7 @@ export default async function ConfirmationPage({
   const { locale } = await params;
   const query = (await searchParams) ?? {};
   const page = Math.max(Number(query.page ?? 1), 1);
-  const status = typeof query.status === 'string' ? query.status : 'all';
+  const status = typeof query.status === 'string' ? query.status : 'actionable';
   const search = typeof query.search === 'string' ? query.search : '';
   const apiQuery = new URLSearchParams({
     page: String(page),
@@ -82,11 +99,8 @@ export default async function ConfirmationPage({
     getWorkspaceSettings(),
   ]);
   const tasks = result.data;
-  const pending =
-    (result.summary.PENDING ?? 0) +
-    (result.summary.IN_PROGRESS ?? 0) +
-    (result.summary.CALL_LATER ?? 0);
-  const confirmed = result.summary.CONFIRMED ?? 0;
+  const pending = result.metrics.actionable;
+  const confirmed = result.metrics.confirmedToday;
   const unreachable = result.summary.UNREACHABLE ?? 0;
 
   return (
@@ -106,10 +120,42 @@ export default async function ConfirmationPage({
           badgeTone={pending ? 'warning' : 'success'}
         />
         <MetricCard
-          label="Confirmed"
+          label="Confirmed today"
           value={String(confirmed)}
           help="Orders approved by customers."
           badge="Ready"
+          badgeTone="info"
+        />
+        <MetricCard
+          label="Cancelled"
+          value={String(result.metrics.cancelled)}
+          help="Orders cancelled after customer review."
+          badge={result.metrics.cancelled ? 'Review' : 'Clear'}
+          badgeTone={result.metrics.cancelled ? 'danger' : 'success'}
+        />
+        <MetricCard
+          label="Average wait"
+          value={`${Math.round(result.metrics.averageWaitingHours)}h`}
+          help="Average age of actionable confirmation work."
+          badge={result.metrics.averageWaitingHours >= 24 ? 'SLA risk' : 'Healthy'}
+          badgeTone={result.metrics.averageWaitingHours >= 24 ? 'warning' : 'success'}
+        />
+        <MetricCard
+          label="Overdue SLA"
+          value={String(result.metrics.overdueSla)}
+          help="Actionable orders waiting more than 24 hours."
+          badge={result.metrics.overdueSla ? 'Priority' : 'Clear'}
+          badgeTone={result.metrics.overdueSla ? 'warning' : 'success'}
+        />
+        <MetricCard
+          label="Confirmation rate"
+          value={
+            result.metrics.confirmationRate === null
+              ? 'Unavailable'
+              : `${Math.round(result.metrics.confirmationRate * 100)}%`
+          }
+          help="Confirmed decisions divided by confirmed and refused decisions."
+          badge="Decisions"
           badgeTone="info"
         />
         <MetricCard
@@ -142,6 +188,7 @@ export default async function ConfirmationPage({
           <span>Status</span>
           <select className="field" name="status" defaultValue={status}>
             <option value="all">All statuses</option>
+            <option value="actionable">Needs action</option>
             <option value="PENDING">Pending</option>
             <option value="IN_PROGRESS">In progress</option>
             <option value="CALL_LATER">Call later</option>
@@ -171,8 +218,11 @@ export default async function ConfirmationPage({
                   <th>Customer</th>
                   <th>City</th>
                   <th>Value</th>
+                  <th>Items</th>
+                  <th>Source</th>
                   <th>Task</th>
-                  <th>Order status</th>
+                  <th>Priority</th>
+                  <th>Last action</th>
                   <th>Action</th>
                 </tr>
               </thead>
@@ -207,16 +257,39 @@ export default async function ConfirmationPage({
                     </td>
                     <td>{task.order.customer?.city ?? '-'}</td>
                     <td>{formatMoney(task.order.totalAmount, workspace.baseCurrency, locale)}</td>
+                    <td>{task.order._count.items}</td>
+                    <td>
+                      <span className="badge badge-muted">{task.order.source.toUpperCase()}</span>
+                    </td>
                     <td>
                       <span className="badge badge-muted">{task.status}</span>
                       <div>
                         {task.attempts} attempt{task.attempts === 1 ? '' : 's'}
                       </div>
                     </td>
-                    <td>{task.order.status}</td>
+                    <td>
+                      <span
+                        className={`badge ${task.priority === 'HIGH' ? 'badge-danger' : task.priority === 'MEDIUM' ? 'badge-warning' : 'badge-muted'}`}
+                      >
+                        {task.priority}
+                      </span>
+                      <div className="field-help">{task.overdue ? 'Overdue' : 'Within SLA'}</div>
+                    </td>
+                    <td>
+                      {task.lastAction ?? 'No action yet'}
+                      <div className="field-help">{task.assignedTo?.name ?? 'Unassigned'}</div>
+                    </td>
                     <td>
                       <form action={updateConfirmation} className="inline-form">
                         <input name="id" type="hidden" value={task.id} />
+                        <button
+                          className="button button-secondary"
+                          name="action"
+                          value="CALL_LATER"
+                          type="submit"
+                        >
+                          Follow up
+                        </button>
                         <button
                           className="button button-secondary"
                           name="action"

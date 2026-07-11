@@ -1,4 +1,4 @@
-import { Controller, Get, UseGuards } from '@nestjs/common';
+import { Controller, Get, Query, UseGuards } from '@nestjs/common';
 import { ApiOperation, ApiTags } from '@nestjs/swagger';
 import { CurrentUser, InternalAuthGuard, type SessionUser } from '../../core/auth';
 import { DashboardService } from './dashboard.service';
@@ -11,7 +11,12 @@ export class DashboardController {
 
   @Get('summary')
   @ApiOperation({ summary: 'Get organization dashboard summary' })
-  getSummary(@CurrentUser() user: SessionUser) {
-    return this.dashboardService.getSummary(user.organizationId);
+  getSummary(
+    @CurrentUser() user: SessionUser,
+    @Query('range') range?: string,
+    @Query('dateFrom') dateFrom?: string,
+    @Query('dateTo') dateTo?: string,
+  ) {
+    return this.dashboardService.getSummary(user.organizationId, { range, dateFrom, dateTo });
   }
 }

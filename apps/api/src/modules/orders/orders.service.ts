@@ -30,6 +30,7 @@ export class OrdersService {
 
     return {
       organizationId,
+      ...(source && source !== 'all' ? {} : { source: { not: 'smoke' } }),
       ...(status ? { status } : {}),
       ...(source && source !== 'all' ? { source } : {}),
       ...(Object.keys(createdAt).length ? { createdAt } : {}),
@@ -86,6 +87,7 @@ export class OrdersService {
           by: ['status'],
           where,
           _count: { _all: true },
+          _sum: { totalAmount: true },
         }),
         this.prisma.order.groupBy({
           by: ['source'],
@@ -109,6 +111,10 @@ export class OrdersService {
       acc[item.status] = item._count._all;
       return acc;
     }, {});
+    const valueByStatus = statusCounts.reduce<Record<string, number>>((acc, item) => {
+      acc[item.status] = Number(item._sum.totalAmount ?? 0);
+      return acc;
+    }, {});
     const bySource = sourceCounts.reduce<Record<string, number>>((acc, item) => {
       acc[item.source] = item._count._all;
       return acc;
@@ -122,6 +128,7 @@ export class OrdersService {
       totalOrders,
       totalRevenue: Number(revenue._sum.totalAmount ?? 0),
       statusCounts: byStatus,
+      valueByStatus,
       sourceCounts: bySource,
       shopifyOrderCount: bySource.shopify ?? 0,
       missingCostCount,
@@ -283,7 +290,7 @@ export class OrdersService {
         data: {
           organizationId,
           orderNumber,
-          source: 'manual',
+          source: dto.source ?? 'manual',
           customerId: customer.id,
           customerName: dto.customerName,
           customerPhone: dto.customerPhone,
@@ -478,6 +485,16 @@ export class OrdersService {
 
       return updated;
     });
+  }
+
+  async deleteSmokeOrder(organizationId: string, id: string) {
+    const order = await this.prisma.order.findFirst({
+      where: { id, organizationId, source: 'smoke' },
+      select: { id: true },
+    });
+    if (!order) throw new NotFoundException('Smoke order not found');
+    await this.prisma.order.delete({ where: { id } });
+    return { deleted: true };
   }
 }
 

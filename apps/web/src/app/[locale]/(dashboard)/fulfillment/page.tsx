@@ -43,6 +43,8 @@ async function updateFulfillment(formData: FormData) {
   revalidatePath('/[locale]/inventory', 'page');
   revalidatePath('/[locale]/dashboard', 'page');
   revalidatePath('/[locale]/orders', 'page');
+  revalidatePath('/[locale]/activity', 'page');
+  revalidatePath('/[locale]/finance', 'page');
 }
 
 export default async function FulfillmentPage({ params }: { params: Promise<{ locale: string }> }) {

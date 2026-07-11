@@ -1,7 +1,7 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { ConfirmationStatus, DeliveryStatus, FulfillmentStatus, OrderStatus } from '@prisma/client';
 import { PrismaService } from '../../core/prisma/prisma.service';
-import { ConfirmationAction } from './dto/update-confirmation.dto';
+import { ConfirmationAction, UpdateConfirmationDto } from './dto/update-confirmation.dto';
 
 @Injectable()
 export class WorkflowsService {
@@ -13,13 +13,21 @@ export class WorkflowsService {
   ) {
     const page = Math.max(Number(query.page ?? 1), 1);
     const limit = Math.min(Math.max(Number(query.limit ?? 25), 1), 50);
+    const requestedStatus = query.status ?? 'actionable';
     const status =
-      query.status && query.status !== 'all' ? (query.status as ConfirmationStatus) : undefined;
+      requestedStatus !== 'all' && requestedStatus !== 'actionable'
+        ? (requestedStatus as ConfirmationStatus)
+        : undefined;
     const search = query.search?.trim();
     const where = {
-      ...(status ? { status } : {}),
+      ...(status
+        ? { status }
+        : requestedStatus === 'actionable'
+          ? { status: { in: ['PENDING', 'IN_PROGRESS', 'CALL_LATER'] as ConfirmationStatus[] } }
+          : {}),
       order: {
         organizationId,
+        ...(requestedStatus === 'actionable' ? { status: OrderStatus.PENDING } : {}),
         ...(search
           ? {
               OR: [
@@ -33,11 +41,22 @@ export class WorkflowsService {
       },
     };
 
-    const [data, total, summary] = await Promise.all([
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const [data, total, summary, actionable, confirmedToday, cancelled] = await Promise.all([
       this.prisma.confirmationTask.findMany({
         where,
-        include: { order: { include: { customer: true } }, assignedTo: true },
-        orderBy: [{ status: 'asc' }, { updatedAt: 'desc' }],
+        include: {
+          order: {
+            include: {
+              customer: true,
+              _count: { select: { items: true } },
+              events: { orderBy: { createdAt: 'desc' }, take: 1 },
+            },
+          },
+          assignedTo: true,
+        },
+        orderBy: [{ createdAt: 'asc' }],
         skip: (page - 1) * limit,
         take: limit,
       }),
@@ -47,6 +66,18 @@ export class WorkflowsService {
         where: { order: { organizationId } },
         _count: { _all: true },
       }),
+      this.prisma.confirmationTask.findMany({
+        where: {
+          order: { organizationId, status: OrderStatus.PENDING },
+          status: { in: ['PENDING', 'IN_PROGRESS', 'CALL_LATER'] },
+        },
+        select: { createdAt: true },
+        take: 5000,
+      }),
+      this.prisma.confirmationTask.count({
+        where: { order: { organizationId }, status: 'CONFIRMED', updatedAt: { gte: today } },
+      }),
+      this.prisma.order.count({ where: { organizationId, status: 'CANCELLED' } }),
     ]);
 
     const byStatus = summary.reduce<Record<string, number>>((acc, item) => {
@@ -55,12 +86,44 @@ export class WorkflowsService {
     }, {});
 
     return {
-      data,
+      data: data.map((task) => {
+        const ageHours = Math.max((Date.now() - task.createdAt.getTime()) / 36e5, 0);
+        const priority =
+          ageHours >= 48 || Number(task.order.totalAmount) >= 150
+            ? 'HIGH'
+            : ageHours >= 24 || task.attempts > 0
+              ? 'MEDIUM'
+              : 'NORMAL';
+        return {
+          ...task,
+          ageHours,
+          overdue: ageHours >= 24,
+          priority,
+          lastAction: task.order.events[0]?.note ?? null,
+        };
+      }),
       total,
       page,
       limit,
       totalPages: Math.max(Math.ceil(total / limit), 1),
       summary: byStatus,
+      metrics: {
+        actionable: actionable.length,
+        confirmedToday,
+        cancelled,
+        averageWaitingHours: actionable.length
+          ? actionable.reduce(
+              (totalHours, task) => totalHours + (Date.now() - task.createdAt.getTime()) / 36e5,
+              0,
+            ) / actionable.length
+          : 0,
+        overdueSla: actionable.filter((task) => Date.now() - task.createdAt.getTime() >= 24 * 36e5)
+          .length,
+        confirmationRate:
+          (byStatus.CONFIRMED ?? 0) + (byStatus.REFUSED ?? 0) > 0
+            ? (byStatus.CONFIRMED ?? 0) / ((byStatus.CONFIRMED ?? 0) + (byStatus.REFUSED ?? 0))
+            : null,
+      },
     };
   }
 
@@ -68,31 +131,36 @@ export class WorkflowsService {
     organizationId: string,
     userId: string,
     id: string,
-    action: ConfirmationAction,
+    dto: UpdateConfirmationDto,
   ) {
+    const action = dto.action;
     const task = await this.prisma.confirmationTask.findFirst({
       where: { id, order: { organizationId } },
       include: { order: true },
     });
     if (!task) throw new NotFoundException('Confirmation task not found');
 
-    const taskStatus =
-      action === ConfirmationAction.CONFIRMED
-        ? ConfirmationStatus.CONFIRMED
-        : action === ConfirmationAction.UNREACHABLE
-          ? ConfirmationStatus.UNREACHABLE
-          : ConfirmationStatus.UNREACHABLE;
+    const taskStatus = confirmationTaskStatus(action);
     const orderStatus =
       action === ConfirmationAction.CONFIRMED
         ? OrderStatus.CONFIRMED
         : action === ConfirmationAction.CANCELLED
           ? OrderStatus.CANCELLED
-          : task.order.status;
+          : action === ConfirmationAction.REFUSED
+            ? OrderStatus.REFUSED
+            : task.order.status;
+
+    if (task.status === taskStatus && task.order.status === orderStatus) return task;
 
     return this.prisma.$transaction(async (tx) => {
       const updated = await tx.confirmationTask.update({
         where: { id },
-        data: { status: taskStatus, attempts: { increment: 1 } },
+        data: {
+          status: taskStatus,
+          attempts: { increment: 1 },
+          ...(dto.note !== undefined ? { notes: dto.note.trim() || null } : {}),
+          ...(dto.scheduledAt ? { scheduledAt: new Date(dto.scheduledAt) } : {}),
+        },
         include: { order: { include: { customer: true } }, assignedTo: true },
       });
 
@@ -105,7 +173,12 @@ export class WorkflowsService {
               type: 'confirmation_action',
               userId,
               note: `Confirmation marked ${action.toLowerCase()}`,
-              data: { action, from: task.order.status, to: orderStatus },
+              data: {
+                action,
+                from: task.order.status,
+                to: orderStatus,
+                scheduledAt: dto.scheduledAt ?? null,
+              },
             },
           },
         },
@@ -280,4 +353,11 @@ export class WorkflowsService {
       return updated;
     });
   }
+}
+
+function confirmationTaskStatus(action: ConfirmationAction) {
+  if (action === ConfirmationAction.CONFIRMED) return ConfirmationStatus.CONFIRMED;
+  if (action === ConfirmationAction.UNREACHABLE) return ConfirmationStatus.UNREACHABLE;
+  if (action === ConfirmationAction.CALL_LATER) return ConfirmationStatus.CALL_LATER;
+  return ConfirmationStatus.REFUSED;
 }

@@ -6,6 +6,25 @@ const API_URL = process.env.API_URL || process.env.NEXT_PUBLIC_API_URL || 'http:
 const API_INTERNAL_SECRET = process.env.API_INTERNAL_SECRET || 'shopy-internal-secret';
 const getApiSession = cache(auth);
 
+export type ApiLoadState = 'ready' | 'unauthorized' | 'timeout' | 'error';
+
+export interface ApiLoadResult<T> {
+  data: T;
+  state: ApiLoadState;
+  message?: string;
+}
+
+export class ApiRequestError extends Error {
+  constructor(
+    message: string,
+    readonly status?: number,
+    readonly code: 'unauthorized' | 'timeout' | 'error' = 'error',
+  ) {
+    super(message);
+    this.name = 'ApiRequestError';
+  }
+}
+
 function apiUrl(path: string) {
   const base = API_URL.replace(/\/$/, '');
   if (base.endsWith('/api/v1') && path.startsWith('/api/v1')) {
@@ -14,11 +33,21 @@ function apiUrl(path: string) {
   return `${base}${path}`;
 }
 
-export async function apiFetch<T>(path: string, init: RequestInit = {}): Promise<T> {
+async function requestApi<T>(
+  path: string,
+  init: RequestInit,
+  options: { timeoutMs: number; attempts: number },
+): Promise<T> {
   const session = await getApiSession();
   if (!session?.user) {
-    throw new Error('Not authenticated');
+    throw new ApiRequestError(
+      'Your session is no longer valid. Sign in again.',
+      401,
+      'unauthorized',
+    );
   }
+
+  const requestId = `web-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
 
   const headers = {
     'Content-Type': 'application/json',
@@ -28,16 +57,16 @@ export async function apiFetch<T>(path: string, init: RequestInit = {}): Promise
     'x-user-email': session.user.email ?? '',
     'x-user-role': session.user.role,
     'x-organization-id': session.user.organizationId,
+    'x-request-id': requestId,
     ...init.headers,
   };
 
-  const method = init.method?.toUpperCase() ?? 'GET';
-  const attempts = method === 'GET' ? 2 : 1;
   let lastError: unknown;
 
-  for (let attempt = 0; attempt < attempts; attempt += 1) {
+  for (let attempt = 0; attempt < options.attempts; attempt += 1) {
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 12000);
+    const timeout = setTimeout(() => controller.abort(), options.timeoutMs);
+    const startedAt = Date.now();
 
     try {
       const response = await fetch(apiUrl(path), {
@@ -49,22 +78,89 @@ export async function apiFetch<T>(path: string, init: RequestInit = {}): Promise
       clearTimeout(timeout);
 
       if (!response.ok) {
-        throw new Error(`API request failed: ${response.status}`);
+        const durationMs = Date.now() - startedAt;
+        console.warn(
+          JSON.stringify({
+            event: 'api_request_failed',
+            requestId,
+            path,
+            status: response.status,
+            durationMs,
+          }),
+        );
+        if (response.status === 401 || response.status === 403) {
+          throw new ApiRequestError(
+            'Your session is no longer valid. Sign in again.',
+            response.status,
+            'unauthorized',
+          );
+        }
+        throw new ApiRequestError(
+          `The workspace request failed (${response.status}).`,
+          response.status,
+        );
+      }
+
+      const durationMs = Date.now() - startedAt;
+      if (durationMs > 1500) {
+        console.warn(
+          JSON.stringify({
+            event: 'slow_api_request',
+            requestId,
+            path,
+            status: response.status,
+            durationMs,
+          }),
+        );
       }
 
       return response.json() as Promise<T>;
     } catch (error) {
       clearTimeout(timeout);
       lastError = error;
-      if (attempt < attempts - 1) await new Promise((resolve) => setTimeout(resolve, 450));
+      if (error instanceof ApiRequestError && error.code === 'unauthorized') throw error;
+      if (attempt < options.attempts - 1) await new Promise((resolve) => setTimeout(resolve, 450));
     }
   }
 
-  throw new Error(
-    lastError instanceof Error && lastError.name === 'AbortError'
-      ? 'Connecting to Shopy API took too long. The free API may be starting.'
-      : 'Connecting to Shopy API failed. The free API may be starting.',
-  );
+  if (lastError instanceof ApiRequestError) throw lastError;
+  if (lastError instanceof Error && lastError.name === 'AbortError') {
+    throw new ApiRequestError(
+      'The workspace API is starting. This usually takes a few seconds.',
+      undefined,
+      'timeout',
+    );
+  }
+  throw new ApiRequestError('The workspace service could not be reached.', undefined, 'error');
+}
+
+export async function apiFetch<T>(path: string, init: RequestInit = {}): Promise<T> {
+  const method = init.method?.toUpperCase() ?? 'GET';
+  return requestApi<T>(path, init, {
+    timeoutMs: method === 'GET' ? 15000 : 20000,
+    attempts: method === 'GET' ? 2 : 1,
+  });
+}
+
+export async function apiFetchState<T>(
+  path: string,
+  fallback: T,
+  options: { timeoutMs?: number } = {},
+): Promise<ApiLoadResult<T>> {
+  try {
+    return {
+      data: await requestApi<T>(path, {}, { timeoutMs: options.timeoutMs ?? 5000, attempts: 1 }),
+      state: 'ready',
+    };
+  } catch (error) {
+    const state = error instanceof ApiRequestError ? error.code : 'error';
+    return {
+      data: fallback,
+      state,
+      message:
+        error instanceof Error ? error.message : 'The workspace service could not be reached.',
+    };
+  }
 }
 
 export const getWorkspaceSettings = cache(async () => {

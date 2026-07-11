@@ -1,4 +1,14 @@
-import { Body, Controller, Get, Param, Patch, Post, Query, UseGuards } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Delete,
+  Get,
+  Param,
+  Patch,
+  Post,
+  Query,
+  UseGuards,
+} from '@nestjs/common';
 import { ApiOperation, ApiTags } from '@nestjs/swagger';
 import type { OrderStatus } from '@prisma/client';
 import { CurrentUser, InternalAuthGuard, type SessionUser } from '../../core/auth';
@@ -101,5 +111,11 @@ export class OrdersController {
     @Body() dto: { note?: string },
   ) {
     return this.ordersService.addNote(user.organizationId, user.id, id, dto.note ?? '');
+  }
+
+  @Delete(':id/smoke')
+  @ApiOperation({ summary: 'Delete an isolated smoke-test order' })
+  deleteSmoke(@CurrentUser() user: SessionUser, @Param('id') id: string) {
+    return this.ordersService.deleteSmokeOrder(user.organizationId, id);
   }
 }

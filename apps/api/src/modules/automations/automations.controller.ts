@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Patch, Post, UseGuards } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, Patch, Post, UseGuards } from '@nestjs/common';
 import { CurrentUser, InternalAuthGuard, type SessionUser } from '../../core/auth';
 import { AutomationsService } from './automations.service';
 import { CreateAutomationDto, UpdateAutomationDto } from './dto/automation.dto';
@@ -45,5 +45,10 @@ export class AutomationsController {
   @Post(':id/run')
   run(@CurrentUser() user: SessionUser, @Param('id') id: string) {
     return this.automationsService.run(user.organizationId, id);
+  }
+
+  @Delete(':id/smoke')
+  deleteSmoke(@CurrentUser() user: SessionUser, @Param('id') id: string) {
+    return this.automationsService.deleteSmoke(user.organizationId, id);
   }
 }

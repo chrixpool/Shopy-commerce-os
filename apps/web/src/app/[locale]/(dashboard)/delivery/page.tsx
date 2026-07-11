@@ -44,6 +44,8 @@ async function updateDelivery(formData: FormData) {
   revalidatePath('/[locale]/delivery', 'page');
   revalidatePath('/[locale]/dashboard', 'page');
   revalidatePath('/[locale]/orders', 'page');
+  revalidatePath('/[locale]/activity', 'page');
+  revalidatePath('/[locale]/finance', 'page');
 }
 
 export default async function DeliveryPage({ params }: { params: Promise<{ locale: string }> }) {

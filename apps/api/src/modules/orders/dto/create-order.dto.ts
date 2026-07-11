@@ -2,6 +2,7 @@ import { Type } from 'class-transformer';
 import {
   IsArray,
   IsInt,
+  IsIn,
   IsNumber,
   IsOptional,
   IsString,
@@ -41,6 +42,11 @@ export class CreateOrderItemDto {
 }
 
 export class CreateOrderDto {
+  @ApiPropertyOptional({ enum: ['manual', 'csv', 'smoke'] })
+  @IsOptional()
+  @IsIn(['manual', 'csv', 'smoke'])
+  source?: 'manual' | 'csv' | 'smoke';
+
   @ApiProperty()
   @IsString()
   @MinLength(1)

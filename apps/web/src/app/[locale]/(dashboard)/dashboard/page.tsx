@@ -8,7 +8,8 @@ import {
   StatusBadge,
   SurfaceCard,
 } from '@/components/ui/page';
-import { apiFetch, getWorkspaceSettings } from '@/lib/api';
+import { WorkspaceRecovery } from '@/components/ui/workspace-recovery';
+import { apiFetchState } from '@/lib/api';
 import { formatMoney } from '@/lib/currency';
 
 interface DashboardSummary {
@@ -21,6 +22,24 @@ interface DashboardSummary {
     lowStockProducts: number;
   };
   ordersByStatus: Record<string, number>;
+  comparison?: { ordersPercent: number | null; revenuePercent: number | null };
+  funnel?: Record<string, number>;
+  rates?: { confirmation: number | null; delivery: number | null };
+  finance?: {
+    grossMargin: number;
+    estimatedCogs: number;
+    operatingExpenses: number;
+    estimatedNetContribution: number;
+    costedOrders: number;
+    ordersMissingCost: number;
+    productsMissingCost: number;
+    negativeMarginOrders: number;
+  };
+  dataQuality?: {
+    unmatchedShopifyItems: number;
+    productsMissingCost: number;
+    ordersMissingCost: number;
+  };
   suggestions: Array<{ title: string; copy: string }>;
 }
 
@@ -69,32 +88,59 @@ const EMPTY_SUMMARY: DashboardSummary = {
   suggestions: [],
 };
 
-async function optionalApiFetch<T>(path: string, fallback: T, timeoutMs = 3500) {
-  try {
-    return await Promise.race([
-      apiFetch<T>(path),
-      new Promise<T>((resolve) => setTimeout(() => resolve(fallback), timeoutMs)),
-    ]);
-  } catch {
-    return fallback;
-  }
-}
-
-export default async function DashboardPage({ params }: { params: Promise<{ locale: string }> }) {
+export default async function DashboardPage({
+  params,
+  searchParams,
+}: {
+  params: Promise<{ locale: string }>;
+  searchParams?: Promise<Record<string, string | string[] | undefined>>;
+}) {
   const { locale } = await params;
+  const filters = (await searchParams) ?? {};
+  const range = typeof filters.range === 'string' ? filters.range : '30d';
+  const dateFrom = typeof filters.dateFrom === 'string' ? filters.dateFrom : '';
+  const dateTo = typeof filters.dateTo === 'string' ? filters.dateTo : '';
+  const dashboardQuery = new URLSearchParams({
+    range,
+    ...(dateFrom ? { dateFrom } : {}),
+    ...(dateTo ? { dateTo } : {}),
+  });
   const t = await getTranslations();
-  const [summary, workspace, integrations, draftActions, costing, shopifyRuns] = await Promise.all([
-    optionalApiFetch<DashboardSummary>('/api/v1/dashboard/summary', EMPTY_SUMMARY),
-    getWorkspaceSettings().catch(() => ({ baseCurrency: 'USD' })),
-    optionalApiFetch<IntegrationStatus[]>('/api/v1/integrations', []),
-    optionalApiFetch<DraftAction[]>('/api/v1/draft-actions', []),
-    optionalApiFetch<CostingSummary>('/api/v1/costing/summary', {
+  const [
+    summaryResult,
+    workspaceResult,
+    integrationsResult,
+    draftActionsResult,
+    costingResult,
+    shopifyRunsResult,
+  ] = await Promise.all([
+    apiFetchState<DashboardSummary>(
+      `/api/v1/dashboard/summary?${dashboardQuery.toString()}`,
+      EMPTY_SUMMARY,
+    ),
+    apiFetchState<{ baseCurrency: string }>('/api/v1/settings/organization', {
+      baseCurrency: 'USD',
+    }),
+    apiFetchState<IntegrationStatus[]>('/api/v1/integrations', []),
+    apiFetchState<DraftAction[]>('/api/v1/draft-actions', []),
+    apiFetchState<CostingSummary>('/api/v1/costing/summary', {
       grossMargin: 0,
       grossMarginPercent: 0,
       productsMissingCost: 0,
     }),
-    optionalApiFetch<SyncRun[]>('/api/v1/integrations/shopify/sync-runs', [], 1200),
+    apiFetchState<SyncRun[]>('/api/v1/integrations/shopify/sync-runs', [], { timeoutMs: 3000 }),
   ]);
+  if ([summaryResult.state, workspaceResult.state].includes('unauthorized')) {
+    throw new Error('Your session is no longer valid. Sign in again.');
+  }
+  const summary = summaryResult.data;
+  const workspace = workspaceResult.data;
+  const integrations = integrationsResult.data;
+  const draftActions = draftActionsResult.data;
+  const costing = costingResult.data;
+  const shopifyRuns = shopifyRunsResult.data;
+  const criticalUnavailable = summaryResult.state !== 'ready';
+  const integrationsUnavailable = integrationsResult.state !== 'ready';
   const connectedChannels = integrations.filter(
     (integration) => integration.status === 'CONNECTED',
   );
@@ -132,6 +178,30 @@ export default async function DashboardPage({ params }: { params: Promise<{ loca
       ? {
           title: 'Product cost data missing',
           copy: `${costing.productsMissingCost} product(s) need unit costs before margin is reliable.`,
+          href: 'factory',
+          tone: 'warning',
+        }
+      : null,
+    summary.finance?.ordersMissingCost
+      ? {
+          title: 'Order margins are incomplete',
+          copy: `${summary.finance.ordersMissingCost} order(s) need cost recalculation before Finance is complete.`,
+          href: 'factory',
+          tone: 'warning',
+        }
+      : null,
+    summary.finance?.negativeMarginOrders
+      ? {
+          title: 'Negative margin detected',
+          copy: `${summary.finance.negativeMarginOrders} costed order(s) are currently below zero gross margin.`,
+          href: 'finance',
+          tone: 'danger',
+        }
+      : null,
+    summary.dataQuality?.unmatchedShopifyItems
+      ? {
+          title: 'Shopify items need product matching',
+          copy: `${summary.dataQuality.unmatchedShopifyItems} imported line item(s) are not linked to inventory.`,
           href: 'factory',
           tone: 'warning',
         }
@@ -195,20 +265,47 @@ export default async function DashboardPage({ params }: { params: Promise<{ loca
         }
       />
 
+      <WorkspaceRecovery active={criticalUnavailable} message={summaryResult.message} />
+
+      <form className="toolbar" action={`/${locale}/dashboard`}>
+        <label className="form-field compact-select">
+          <span>Reporting period</span>
+          <select className="field" name="range" defaultValue={range}>
+            <option value="today">Today</option>
+            <option value="7d">Last 7 days</option>
+            <option value="30d">Last 30 days</option>
+            <option value="custom">Custom</option>
+          </select>
+        </label>
+        <label className="form-field">
+          <span>From</span>
+          <input className="field" type="date" name="dateFrom" defaultValue={dateFrom} />
+        </label>
+        <label className="form-field">
+          <span>To</span>
+          <input className="field" type="date" name="dateTo" defaultValue={dateTo} />
+        </label>
+        <button className="button button-secondary" type="submit">
+          Update view
+        </button>
+      </form>
+
       <section className="stats-grid" aria-label="Key metrics">
         <MetricCard
           label="Total orders"
-          value={String(summary.totalOrders)}
+          value={criticalUnavailable ? '—' : String(summary.totalOrders)}
           help="All orders in this workspace."
           badge="Live"
           badgeTone="info"
+          href={`/${locale}/orders`}
         />
         <MetricCard
           label="Need confirmation"
-          value={String(summary.workQueues.pendingConfirmation)}
+          value={criticalUnavailable ? '—' : String(summary.workQueues.pendingConfirmation)}
           help="Orders waiting for customer calls."
           badge={summary.workQueues.pendingConfirmation ? 'Action' : 'Clear'}
           badgeTone={summary.workQueues.pendingConfirmation ? 'warning' : 'success'}
+          href={`/${locale}/confirmation?status=actionable`}
         />
         <MetricCard
           label="Ready to pack"
@@ -216,6 +313,7 @@ export default async function DashboardPage({ params }: { params: Promise<{ loca
           help="Confirmed orders entering fulfillment."
           badge={summary.workQueues.readyToPack ? 'Ready' : 'Clear'}
           badgeTone={summary.workQueues.readyToPack ? 'info' : 'success'}
+          href={`/${locale}/fulfillment`}
         />
         <MetricCard
           label="Parcels in transit"
@@ -223,6 +321,7 @@ export default async function DashboardPage({ params }: { params: Promise<{ loca
           help="Active parcels not yet delivered or returned."
           badge={summary.workQueues.inDelivery ? 'Live' : 'Clear'}
           badgeTone={summary.workQueues.inDelivery ? 'info' : 'success'}
+          href={`/${locale}/delivery`}
         />
         <MetricCard
           label="Low stock"
@@ -230,27 +329,91 @@ export default async function DashboardPage({ params }: { params: Promise<{ loca
           help="Products at or below their stock threshold."
           badge={summary.workQueues.lowStockProducts ? 'Restock' : 'Clear'}
           badgeTone={summary.workQueues.lowStockProducts ? 'warning' : 'success'}
+          href={`/${locale}/inventory`}
         />
         <MetricCard
           label="Revenue tracked"
-          value={formatMoney(summary.revenue, workspace.baseCurrency, locale)}
+          value={
+            criticalUnavailable ? '—' : formatMoney(summary.revenue, workspace.baseCurrency, locale)
+          }
           help="Revenue from confirmed, shipped, and delivered orders."
           badge="DB"
           badgeTone="muted"
+          href={`/${locale}/finance`}
+        />
+        <MetricCard
+          label="Delivered"
+          value={criticalUnavailable ? '—' : String(summary.ordersByStatus.DELIVERED ?? 0)}
+          help="Orders completed successfully in the selected period."
+          badge="Closed"
+          badgeTone="success"
+          href={`/${locale}/orders?status=DELIVERED`}
+        />
+        <MetricCard
+          label="Cancelled or refused"
+          value={
+            criticalUnavailable
+              ? '—'
+              : String(
+                  (summary.ordersByStatus.CANCELLED ?? 0) + (summary.ordersByStatus.REFUSED ?? 0),
+                )
+          }
+          help="Lost orders requiring operational review."
+          badge={
+            (summary.ordersByStatus.CANCELLED ?? 0) + (summary.ordersByStatus.REFUSED ?? 0)
+              ? 'Review'
+              : 'Clear'
+          }
+          badgeTone={
+            (summary.ordersByStatus.CANCELLED ?? 0) + (summary.ordersByStatus.REFUSED ?? 0)
+              ? 'danger'
+              : 'success'
+          }
+          href={`/${locale}/orders?status=CANCELLED`}
+        />
+        <MetricCard
+          label="Confirmation rate"
+          value={
+            criticalUnavailable || summary.rates?.confirmation == null
+              ? 'Unavailable'
+              : `${Math.round(summary.rates.confirmation * 100)}%`
+          }
+          help="Confirmed decisions divided by all final confirmation decisions."
+          badge="Decisions"
+          badgeTone="info"
+          href={`/${locale}/confirmation`}
+        />
+        <MetricCard
+          label="Delivery success"
+          value={
+            criticalUnavailable || summary.rates?.delivery == null
+              ? 'Unavailable'
+              : `${Math.round(summary.rates.delivery * 100)}%`
+          }
+          help="Delivered orders divided by delivered and returned orders."
+          badge="Outcome"
+          badgeTone="info"
+          href={`/${locale}/delivery`}
         />
         <MetricCard
           label="Connected channels"
-          value={String(connectedChannels.length)}
+          value={integrationsUnavailable ? '—' : String(connectedChannels.length)}
           help="External and local channels available to automation."
-          badge={connectedChannels.length ? 'Online' : 'Manual'}
-          badgeTone={connectedChannels.length ? 'success' : 'muted'}
+          badge={
+            integrationsUnavailable ? 'Refreshing' : connectedChannels.length ? 'Online' : 'Manual'
+          }
+          badgeTone={
+            integrationsUnavailable ? 'warning' : connectedChannels.length ? 'success' : 'muted'
+          }
+          href={`/${locale}/settings`}
         />
         <MetricCard
           label="Draft actions"
-          value={String(pendingDrafts.length)}
+          value={draftActionsResult.state === 'ready' ? String(pendingDrafts.length) : '—'}
           help="Automation recommendations waiting for review."
           badge={pendingDrafts.length ? 'Review' : 'Clear'}
           badgeTone={pendingDrafts.length ? 'warning' : 'success'}
+          href={`/${locale}/automations`}
         />
         <MetricCard
           label="Gross margin"
@@ -258,8 +421,37 @@ export default async function DashboardPage({ params }: { params: Promise<{ loca
           help={`${Math.round(costing.grossMarginPercent * 1000) / 10}% after product cost snapshots.`}
           badge={costing.productsMissingCost ? 'Costs needed' : 'Costed'}
           badgeTone={costing.productsMissingCost ? 'warning' : 'success'}
+          href={`/${locale}/factory`}
         />
       </section>
+
+      <SurfaceCard>
+        <SectionHeader
+          title="Order funnel"
+          description="A real status pipeline for the selected reporting period."
+          actions={
+            <StatusBadge tone={criticalUnavailable ? 'warning' : 'info'}>
+              {criticalUnavailable
+                ? 'Refreshing'
+                : range === 'today'
+                  ? 'Today'
+                  : range === '7d'
+                    ? '7 days'
+                    : range === '30d'
+                      ? '30 days'
+                      : 'Custom'}
+            </StatusBadge>
+          }
+        />
+        <div className="snapshot-grid" style={{ marginTop: 16 }}>
+          {Object.entries(summary.funnel ?? {}).map(([stage, count]) => (
+            <div key={stage}>
+              <span className="metric-label">{stage.replaceAll('_', ' ')}</span>
+              <strong>{criticalUnavailable ? '—' : count}</strong>
+            </div>
+          ))}
+        </div>
+      </SurfaceCard>
 
       <section className="command-grid">
         <SurfaceCard className="command-panel">
@@ -427,8 +619,14 @@ export default async function DashboardPage({ params }: { params: Promise<{ loca
             title="Shopify trust status"
             description="Latest read-only import signal from the connected store."
             actions={
-              <StatusBadge tone={shopify?.status === 'CONNECTED' ? 'success' : 'warning'}>
-                {shopify?.status ?? 'DISCONNECTED'}
+              <StatusBadge
+                tone={
+                  !integrationsUnavailable && shopify?.status === 'CONNECTED'
+                    ? 'success'
+                    : 'warning'
+                }
+              >
+                {integrationsUnavailable ? 'REFRESHING' : (shopify?.status ?? 'DISCONNECTED')}
               </StatusBadge>
             }
           />
@@ -437,18 +635,24 @@ export default async function DashboardPage({ params }: { params: Promise<{ loca
               <span className="metric-label">Connected shop</span>
               <strong>
                 {String(
-                  (shopify?.config?.shop as Record<string, unknown> | undefined)?.name ??
-                    'Not connected',
+                  ((shopify?.config?.shop as Record<string, unknown> | undefined)?.name ??
+                    integrationsUnavailable)
+                    ? 'Temporarily unavailable'
+                    : 'Not connected',
                 )}
               </strong>
             </div>
             <div>
               <span className="metric-label">Imported orders</span>
-              <strong>{String(shopifyTotals?.orders ?? 'Pending')}</strong>
+              <strong>
+                {shopifyRunsResult.state === 'ready'
+                  ? String(shopifyTotals?.orders ?? 'Pending')
+                  : 'Refreshing'}
+              </strong>
             </div>
             <div>
               <span className="metric-label">Warnings</span>
-              <strong>{shopifyWarnings.length}</strong>
+              <strong>{shopifyRunsResult.state === 'ready' ? shopifyWarnings.length : '—'}</strong>
             </div>
           </div>
         </SurfaceCard>

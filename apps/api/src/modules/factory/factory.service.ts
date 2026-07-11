@@ -223,28 +223,159 @@ export class FactoryService {
     });
   }
 
-  async summary(organizationId: string) {
-    const [snapshots, expenses, productsMissingCost, totalProducts] = await Promise.all([
-      this.prisma.orderCostSnapshot.findMany({ where: { organizationId }, take: 250 }),
-      this.prisma.operatingExpense.findMany({ where: { organizationId, active: true } }),
+  async summary(organizationId: string, query: { dateFrom?: string; dateTo?: string } = {}) {
+    const staleBefore = new Date(Date.now() - 90 * 86400000);
+    const createdAt: Prisma.DateTimeFilter = {};
+    if (query.dateFrom) createdAt.gte = new Date(query.dateFrom);
+    if (query.dateTo) createdAt.lte = new Date(query.dateTo);
+    const periodOrderFilter: Prisma.OrderWhereInput = {
+      source: { not: 'smoke' },
+      ...(Object.keys(createdAt).length ? { createdAt } : {}),
+    };
+    const [
+      snapshotAggregate,
+      snapshots,
+      expenseAggregate,
+      productsMissingCost,
+      totalProducts,
+      ordersMissingCost,
+      unmatchedShopifyItems,
+      negativeMarginOrders,
+      staleCostRecords,
+      orderItems,
+    ] = await Promise.all([
+      this.prisma.orderCostSnapshot.aggregate({
+        where: { organizationId, order: periodOrderFilter },
+        _sum: { revenue: true, totalCost: true, grossMargin: true },
+        _count: { _all: true },
+      }),
+      this.prisma.orderCostSnapshot.findMany({
+        where: { organizationId, order: periodOrderFilter },
+        include: {
+          order: { select: { orderNumber: true, source: true, status: true, createdAt: true } },
+        },
+        orderBy: { calculatedAt: 'desc' },
+        take: 250,
+      }),
+      this.prisma.operatingExpense.aggregate({
+        where: {
+          organizationId,
+          active: true,
+          ...(Object.keys(createdAt).length ? { createdAt } : {}),
+        },
+        _sum: { amount: true },
+      }),
       this.prisma.product.count({
-        where: { organizationId, productCosts: { none: { active: true } } },
+        where: { organizationId, isActive: true, productCosts: { none: { active: true } } },
       }),
       this.prisma.product.count({ where: { organizationId, isActive: true } }),
+      this.prisma.order.count({
+        where: { organizationId, ...periodOrderFilter, costSnapshot: null },
+      }),
+      this.prisma.orderItem.count({
+        where: {
+          order: { organizationId, source: 'shopify', ...periodOrderFilter },
+          productId: null,
+        },
+      }),
+      this.prisma.orderCostSnapshot.count({
+        where: { organizationId, order: periodOrderFilter, grossMargin: { lt: 0 } },
+      }),
+      this.prisma.productCost.count({
+        where: { organizationId, active: true, effectiveFrom: { lt: staleBefore } },
+      }),
+      this.prisma.orderItem.findMany({
+        where: { order: { organizationId, ...periodOrderFilter }, productId: { not: null } },
+        select: {
+          productId: true,
+          quantity: true,
+          total: true,
+          product: {
+            select: {
+              name: true,
+              sku: true,
+              productCosts: {
+                where: { active: true },
+                orderBy: { effectiveFrom: 'desc' },
+                take: 1,
+                select: { totalUnitCost: true },
+              },
+            },
+          },
+        },
+        take: 5000,
+      }),
     ]);
-    const revenue = sum(snapshots.map((item) => item.revenue));
-    const totalCost = sum(snapshots.map((item) => item.totalCost));
-    const grossMargin = revenue - totalCost;
+    const revenue = Number(snapshotAggregate._sum.revenue ?? 0);
+    const totalCost = Number(snapshotAggregate._sum.totalCost ?? 0);
+    const grossMargin = Number(snapshotAggregate._sum.grossMargin ?? 0);
+    const expenses = Number(expenseAggregate._sum.amount ?? 0);
+    const sourceProfitability = new Map<
+      string,
+      { revenue: number; cost: number; margin: number }
+    >();
+    for (const snapshot of snapshots) {
+      const source = snapshot.order.source;
+      const entry = sourceProfitability.get(source) ?? { revenue: 0, cost: 0, margin: 0 };
+      entry.revenue += Number(snapshot.revenue);
+      entry.cost += Number(snapshot.totalCost);
+      entry.margin += Number(snapshot.grossMargin);
+      sourceProfitability.set(source, entry);
+    }
+    const productProfitability = new Map<
+      string,
+      { productId: string; name: string; sku: string | null; revenue: number; cost: number }
+    >();
+    for (const item of orderItems) {
+      const productId = item.productId;
+      const unitCost = item.product?.productCosts[0]?.totalUnitCost;
+      if (!productId || unitCost === undefined) continue;
+      const entry = productProfitability.get(productId) ?? {
+        productId,
+        name: item.product?.name ?? 'Product',
+        sku: item.product?.sku ?? null,
+        revenue: 0,
+        cost: 0,
+      };
+      entry.revenue += Number(item.total);
+      entry.cost += Number(unitCost) * item.quantity;
+      productProfitability.set(productId, entry);
+    }
+    const productRows = Array.from(productProfitability.values())
+      .map((item) => ({ ...item, margin: item.revenue - item.cost }))
+      .sort((a, b) => b.margin - a.margin);
     return {
       revenue,
       estimatedCogs: totalCost,
       grossMargin,
       grossMarginPercent: revenue > 0 ? grossMargin / revenue : 0,
-      expenses: sum(expenses.map((item) => item.amount)),
-      snapshots: snapshots.length,
+      expenses,
+      estimatedNetContribution: grossMargin - expenses,
+      snapshots: snapshotAggregate._count._all,
       productsMissingCost,
       totalProducts,
       costedProducts: Math.max(totalProducts - productsMissingCost, 0),
+      ordersMissingCost,
+      unmatchedShopifyItems,
+      negativeMarginOrders,
+      staleCostRecords,
+      sourceProfitability: Array.from(sourceProfitability.entries()).map(([source, values]) => ({
+        source,
+        ...values,
+      })),
+      mostProfitableProducts: productRows.slice(0, 5),
+      leastProfitableProducts: [...productRows].reverse().slice(0, 5),
+      recentOrderProfitability: snapshots.slice(0, 25).map((snapshot) => ({
+        orderId: snapshot.orderId,
+        orderNumber: snapshot.order.orderNumber,
+        source: snapshot.order.source,
+        status: snapshot.order.status,
+        revenue: Number(snapshot.revenue),
+        cost: Number(snapshot.totalCost),
+        margin: Number(snapshot.grossMargin),
+        marginPercent: Number(snapshot.grossMarginPercent),
+        calculatedAt: snapshot.calculatedAt,
+      })),
     };
   }
 
@@ -401,10 +532,4 @@ function productCostUpdateData(
     ...(body.notes !== undefined ? { notes: optionalText(body.notes) } : {}),
     ...(typeof body.active === 'boolean' ? { active: body.active } : {}),
   };
-}
-
-function sum(values: Array<Prisma.Decimal | number>): number {
-  let total = 0;
-  for (const value of values) total += Number(value);
-  return total;
 }

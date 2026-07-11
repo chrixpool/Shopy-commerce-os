@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react';
+import Link from 'next/link';
 
 interface PageHeaderProps {
   eyebrow?: string;
@@ -26,18 +27,33 @@ interface MetricCardProps {
   help: string;
   badge?: string;
   badgeTone?: 'success' | 'warning' | 'info' | 'muted' | 'danger';
+  href?: string;
 }
 
-export function MetricCard({ label, value, help, badge, badgeTone = 'muted' }: MetricCardProps) {
-  return (
-    <div className="card metric-card">
+export function MetricCard({
+  label,
+  value,
+  help,
+  badge,
+  badgeTone = 'muted',
+  href,
+}: MetricCardProps) {
+  const content = (
+    <>
       <div className="metric-header">
         <p className="metric-label">{label}</p>
         {badge ? <span className={`badge badge-${badgeTone}`}>{badge}</span> : null}
       </div>
       <p className="metric-value">{value}</p>
       <p className="metric-help">{help}</p>
-    </div>
+    </>
+  );
+  return href ? (
+    <Link className="card metric-card metric-card-link" href={href} prefetch>
+      {content}
+    </Link>
+  ) : (
+    <div className="card metric-card">{content}</div>
   );
 }
 

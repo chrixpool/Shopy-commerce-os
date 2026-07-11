@@ -1,6 +1,7 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import {
   DraftActionStatus,
+  ConfirmationStatus,
   IntegrationMode,
   IntegrationProvider,
   IntegrationStatus,
@@ -783,6 +784,7 @@ export class IntegrationsService {
               .filter(Boolean)
           : [],
       };
+      const confirmationStatus = shopifyConfirmationStatus(orderData.status);
       const itemCreates = await Promise.all(
         lineItems.map(async (item) => {
           const product = await findShopifyProductForLineItem(this.prisma, organizationId, item);
@@ -809,6 +811,12 @@ export class IntegrationsService {
               deleteMany: {},
               create: itemCreates,
             },
+            confirmationTask: {
+              upsert: {
+                update: { status: confirmationStatus },
+                create: { status: confirmationStatus },
+              },
+            },
           },
         });
         stats.orders.updated += 1;
@@ -828,7 +836,7 @@ export class IntegrationsService {
                 data: { provider: 'SHOPIFY', externalId: String(order.id) },
               },
             },
-            confirmationTask: { create: { status: 'PENDING' } },
+            confirmationTask: { create: { status: confirmationStatus } },
           },
         });
         stats.orders.created += 1;
@@ -1386,6 +1394,24 @@ function mapShopifyOrderStatus(order: ShopifyOrder) {
   if (order.fulfillment_status === 'fulfilled') return OrderStatus.SHIPPED;
   if (order.financial_status === 'paid' || order.confirmed) return OrderStatus.CONFIRMED;
   return OrderStatus.PENDING;
+}
+
+function shopifyConfirmationStatus(status: OrderStatus) {
+  if (
+    status === OrderStatus.CONFIRMED ||
+    status === OrderStatus.SHIPPED ||
+    status === OrderStatus.DELIVERED
+  ) {
+    return ConfirmationStatus.CONFIRMED;
+  }
+  if (
+    status === OrderStatus.CANCELLED ||
+    status === OrderStatus.REFUSED ||
+    status === OrderStatus.RETURNED
+  ) {
+    return ConfirmationStatus.REFUSED;
+  }
+  return ConfirmationStatus.PENDING;
 }
 
 function integrationFailureMessage(error: unknown) {

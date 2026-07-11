@@ -106,8 +106,12 @@ export class FactoryController {
   }
 
   @Get('costing/summary')
-  costingSummary(@CurrentUser() user: SessionUser) {
-    return this.factoryService.summary(user.organizationId);
+  costingSummary(
+    @CurrentUser() user: SessionUser,
+    @Query('dateFrom') dateFrom?: string,
+    @Query('dateTo') dateTo?: string,
+  ) {
+    return this.factoryService.summary(user.organizationId, { dateFrom, dateTo });
   }
 
   @Post('costing/recalculate-order/:orderId')

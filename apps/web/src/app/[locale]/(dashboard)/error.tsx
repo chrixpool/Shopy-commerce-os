@@ -7,6 +7,11 @@ export default function DashboardError({
   error: Error & { digest?: string };
   reset: () => void;
 }) {
+  const isAuthFailure =
+    error.message.includes('session is no longer valid') ||
+    error.message.includes('Not authenticated') ||
+    error.message.includes('401') ||
+    error.message.includes('403');
   const isApiFailure =
     error.message.includes('API request failed') ||
     error.message.includes('fetch failed') ||
@@ -21,17 +26,29 @@ export default function DashboardError({
             ER
           </span>
           <h1 className="empty-title">
-            {isApiFailure ? 'Connecting to Shopy API' : 'We could not load this view'}
+            {isAuthFailure
+              ? 'Your session has ended'
+              : isApiFailure
+                ? 'Starting workspace'
+                : 'This view is temporarily unavailable'}
           </h1>
           <p className="empty-description">
-            {isApiFailure
-              ? 'The workspace service may be starting on the free hosting tier. Please retry in a moment.'
-              : 'Please retry. If the issue continues, return to the dashboard and reopen this view.'}
+            {isAuthFailure
+              ? 'Sign in again to continue working in Shopy.'
+              : isApiFailure
+                ? 'The workspace API is starting. This usually takes a few seconds and will not affect your data.'
+                : 'We could not refresh this business view. Retry without leaving the page.'}
           </p>
           <div className="actions-row" style={{ justifyContent: 'center', marginTop: 18 }}>
-            <button className="button button-primary" type="button" onClick={reset}>
-              Try again
-            </button>
+            {isAuthFailure ? (
+              <a className="button button-primary" href="../sign-in">
+                Sign in again
+              </a>
+            ) : (
+              <button className="button button-primary" type="button" onClick={reset}>
+                Retry view
+              </button>
+            )}
           </div>
         </div>
       </div>
