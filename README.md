@@ -189,6 +189,13 @@ pnpm --filter @shopy/api db:generate
 pnpm --filter @shopy/api db:seed
 ```
 
+Production-safe seed behavior:
+
+- Default seed creates or updates only the organization, owner account, currency/settings, and safe system channels.
+- Sample customers, products, orders, workflow tasks, parcels, invitations, and draft actions are skipped by default.
+- To create local demo business data intentionally, set `SEED_DEMO_DATA=true` before running the seed command.
+- Seed no longer clears existing Shopify integration credentials.
+
 Run locally:
 
 ```powershell
@@ -251,11 +258,41 @@ Manual dashboard steps if Neon CLI is unavailable:
 pnpm exec prisma migrate deploy --schema prisma/schema.prisma
 ```
 
-Optional demo seed:
+Optional owner/system seed:
 
 ```powershell
 pnpm --filter @shopy/api db:seed
 ```
+
+Optional demo business data for local testing only:
+
+```powershell
+$env:SEED_DEMO_DATA="true"
+pnpm --filter @shopy/api db:seed
+Remove-Item Env:\SEED_DEMO_DATA
+```
+
+### Production Data Cleanup
+
+Use the cleanup tool only after confirming a Neon recovery branch, backup, or restore path.
+
+Dry-run, counts only:
+
+```powershell
+pnpm data:cleanup:dry-run -- --org=shopy-demo
+```
+
+Execution requires all safety flags and a confirmed recovery point:
+
+```powershell
+$env:NODE_ENV="production"
+$env:CONFIRM_DATA_CLEANUP="shopy-demo"
+$env:DELETE_SOURCES="SEED,DEMO,TEST"
+$env:BACKUP_CONFIRMED="true"
+pnpm data:cleanup:execute -- --org=shopy-demo
+```
+
+The cleanup preserves users, organization settings, currency, integrations, encrypted credentials, Shopify-sourced records, legitimate CSV/manual records, sync history, and external events. It deletes only confidently identified seed/demo/test business records.
 
 ### Render Free API
 

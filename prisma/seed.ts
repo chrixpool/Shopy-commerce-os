@@ -148,6 +148,7 @@ function deliveryStatus(status: OrderStatus) {
 
 async function main() {
   console.log('Seeding database...');
+  const seedDemoData = process.env.SEED_DEMO_DATA === 'true';
 
   const org = await prisma.organization.upsert({
     where: { slug: 'shopy-demo' },
@@ -183,10 +184,6 @@ async function main() {
     where: {
       email: { in: ['demo@Shopy.app', 'demo@shopy.app'] },
     },
-  });
-
-  await prisma.integration.deleteMany({
-    where: { organizationId: org.id, provider: { in: ['shopify'] } },
   });
 
   const seededIntegrations = [
@@ -235,20 +232,40 @@ async function main() {
   ];
 
   for (const integration of seededIntegrations) {
-    await prisma.integration.upsert({
+    const existingIntegration = await prisma.integration.findUnique({
       where: {
         organizationId_provider: { organizationId: org.id, provider: integration.provider },
       },
-      update: {
-        isActive: integration.isActive,
-        status: integration.status,
-        mode: integration.mode,
-        credentials: {},
-        encryptedCredentials: {},
-        config: { label: integration.label, seeded: true },
-        errorMessage: null,
-      },
-      create: {
+      select: { id: true },
+    });
+
+    if (
+      existingIntegration &&
+      [
+        IntegrationProvider.SHOPIFY,
+        IntegrationProvider.META_ADS,
+        IntegrationProvider.FACEBOOK_PAGE,
+        IntegrationProvider.INSTAGRAM,
+      ].includes(integration.provider)
+    ) {
+      continue;
+    }
+
+    if (existingIntegration) {
+      await prisma.integration.update({
+        where: { id: existingIntegration.id },
+        data: {
+          isActive: integration.isActive,
+          status: integration.status,
+          mode: integration.mode,
+          errorMessage: null,
+        },
+      });
+      continue;
+    }
+
+    await prisma.integration.create({
+      data: {
         organizationId: org.id,
         provider: integration.provider,
         isActive: integration.isActive,
@@ -259,6 +276,15 @@ async function main() {
         config: { label: integration.label, seeded: true },
       },
     });
+  }
+
+  if (!seedDemoData) {
+    console.log(`Organization: ${org.name} (${org.slug})`);
+    console.log(`Owner: ${owner.email}`);
+    console.log(
+      'Seed complete. Demo business data skipped. Set SEED_DEMO_DATA=true to create sample records.',
+    );
+    return;
   }
 
   const existingStarterAutomation = await prisma.automation.findFirst({
