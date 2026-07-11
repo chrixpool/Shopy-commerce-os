@@ -19,14 +19,43 @@ export class OrdersController {
     @CurrentUser() user: SessionUser,
     @Query('search') search?: string,
     @Query('status') status?: OrderStatus | 'all',
+    @Query('source') source?: string,
+    @Query('city') city?: string,
+    @Query('dateFrom') dateFrom?: string,
+    @Query('dateTo') dateTo?: string,
     @Query('page') page?: string,
     @Query('limit') limit?: string,
   ) {
     return this.ordersService.list(user.organizationId, {
       search,
       status,
+      source,
+      city,
+      dateFrom,
+      dateTo,
       page: page ? Number(page) : undefined,
       limit: limit ? Number(limit) : undefined,
+    });
+  }
+
+  @Get('summary')
+  @ApiOperation({ summary: 'Summarize organization orders across the full filtered dataset' })
+  summary(
+    @CurrentUser() user: SessionUser,
+    @Query('search') search?: string,
+    @Query('status') status?: OrderStatus | 'all',
+    @Query('source') source?: string,
+    @Query('city') city?: string,
+    @Query('dateFrom') dateFrom?: string,
+    @Query('dateTo') dateTo?: string,
+  ) {
+    return this.ordersService.summary(user.organizationId, {
+      search,
+      status,
+      source,
+      city,
+      dateFrom,
+      dateTo,
     });
   }
 

@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Patch, Post, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Param, Patch, Post, Query, UseGuards } from '@nestjs/common';
 import { CurrentUser, InternalAuthGuard, type SessionUser } from '../../core/auth';
 import { FactoryService } from './factory.service';
 
@@ -55,9 +55,26 @@ export class FactoryController {
     return this.factoryService.listProductCosts(user.organizationId);
   }
 
+  @Get('product-costs/missing')
+  missingProductCosts(
+    @CurrentUser() user: SessionUser,
+    @Query('search') search?: string,
+    @Query('source') source?: string,
+  ) {
+    return this.factoryService.listMissingCostProducts(user.organizationId, { search, source });
+  }
+
   @Post('product-costs')
   upsertProductCost(@CurrentUser() user: SessionUser, @Body() body: Record<string, unknown>) {
     return this.factoryService.upsertProductCost(user.organizationId, body);
+  }
+
+  @Post('product-costs/bulk-complete')
+  bulkCompleteProductCosts(
+    @CurrentUser() user: SessionUser,
+    @Body() body: Record<string, unknown>,
+  ) {
+    return this.factoryService.bulkCompleteProductCosts(user.organizationId, body);
   }
 
   @Patch('product-costs/:id')

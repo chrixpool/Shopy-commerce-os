@@ -38,6 +38,20 @@ interface OrdersResponse {
   totalPages: number;
 }
 
+interface OrdersSummary {
+  totalOrders: number;
+  totalRevenue: number;
+  statusCounts: Record<string, number>;
+  sourceCounts: Record<string, number>;
+  shopifyOrderCount: number;
+  missingCostCount: number;
+  confirmationCounts: {
+    confirmed: number;
+    unreachable: number;
+    cancelled: number;
+  };
+}
+
 const STATUSES = [
   'PENDING',
   'CONFIRMED',
@@ -82,7 +96,13 @@ export default async function OrdersPage({
   searchParams,
 }: {
   params: Promise<{ locale: string }>;
-  searchParams: Promise<{ search?: string; status?: string; page?: string }>;
+  searchParams: Promise<{
+    search?: string;
+    status?: string;
+    source?: string;
+    city?: string;
+    page?: string;
+  }>;
 }) {
   const { locale } = await params;
   const filters = await searchParams;
@@ -91,19 +111,30 @@ export default async function OrdersPage({
     page: filters.page ?? '1',
     limit: '25',
   });
+  const summaryQuery = new URLSearchParams();
   if (filters.search) query.set('search', filters.search);
-  if (filters.status && filters.status !== 'all') query.set('status', filters.status);
+  if (filters.search) summaryQuery.set('search', filters.search);
+  if (filters.status && filters.status !== 'all') {
+    query.set('status', filters.status);
+    summaryQuery.set('status', filters.status);
+  }
+  if (filters.source && filters.source !== 'all') {
+    query.set('source', filters.source);
+    summaryQuery.set('source', filters.source);
+  }
+  if (filters.city) {
+    query.set('city', filters.city);
+    summaryQuery.set('city', filters.city);
+  }
 
-  const [orders, workspace] = await Promise.all([
+  const [orders, summary, workspace] = await Promise.all([
     apiFetch<OrdersResponse>(`/api/v1/orders?${query.toString()}`),
+    apiFetch<OrdersSummary>(`/api/v1/orders/summary?${summaryQuery.toString()}`),
     getWorkspaceSettings(),
   ]);
-  const counts = orders.data.reduce<Record<string, number>>((acc, order) => {
-    acc[order.status] = (acc[order.status] ?? 0) + 1;
-    return acc;
-  }, {});
-  const shopifyOrders = orders.data.filter((order) => order.source === 'shopify').length;
-  const missingCosts = orders.data.filter((order) => !order.costSnapshot).length;
+  const counts = summary.statusCounts;
+  const shopifyOrders = summary.shopifyOrderCount;
+  const missingCosts = summary.missingCostCount;
 
   return (
     <div className="page-stack">
@@ -122,9 +153,23 @@ export default async function OrdersPage({
 
       <section className="stats-grid" aria-label="Order status summary">
         <MetricCard
+          label="Total orders"
+          value={String(summary.totalOrders)}
+          help="All orders matching the current filters."
+          badge="Full set"
+          badgeTone="info"
+        />
+        <MetricCard
+          label="Revenue"
+          value={formatMoney(summary.totalRevenue, workspace.baseCurrency, locale)}
+          help="Total order value across the filtered dataset."
+          badge="Filtered"
+          badgeTone="info"
+        />
+        <MetricCard
           label="Pending"
           value={String(counts.PENDING ?? 0)}
-          help="New orders awaiting first action."
+          help="New orders awaiting first action across all filtered records."
           badge={(counts.PENDING ?? 0) > 0 ? 'Action' : 'Clear'}
           badgeTone={(counts.PENDING ?? 0) > 0 ? 'warning' : 'success'}
         />
@@ -187,6 +232,24 @@ export default async function OrdersPage({
               </option>
             ))}
           </select>
+          <select
+            className="select-field"
+            aria-label="Filter by source"
+            name="source"
+            defaultValue={filters.source ?? 'all'}
+          >
+            <option value="all">All sources</option>
+            <option value="shopify">Shopify</option>
+            <option value="manual">Manual</option>
+            <option value="csv">CSV</option>
+          </select>
+          <input
+            className="field"
+            aria-label="Filter by city"
+            name="city"
+            defaultValue={filters.city ?? ''}
+            placeholder="City"
+          />
         </div>
         <button className="button button-secondary" type="submit">
           Apply

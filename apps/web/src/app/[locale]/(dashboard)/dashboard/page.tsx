@@ -29,6 +29,8 @@ interface IntegrationStatus {
   status: string;
   mode: string;
   lastSyncAt?: string | null;
+  config?: Record<string, unknown>;
+  errorMessage?: string | null;
 }
 
 interface DraftAction {
@@ -45,6 +47,15 @@ interface CostingSummary {
   productsMissingCost: number;
 }
 
+interface SyncRun {
+  id: string;
+  status: string;
+  dryRun?: boolean;
+  startedAt: string;
+  outputSnapshot?: Record<string, unknown> | null;
+  errorMessage?: string | null;
+}
+
 const EMPTY_SUMMARY: DashboardSummary = {
   totalOrders: 0,
   revenue: 0,
@@ -58,9 +69,12 @@ const EMPTY_SUMMARY: DashboardSummary = {
   suggestions: [],
 };
 
-async function optionalApiFetch<T>(path: string, fallback: T) {
+async function optionalApiFetch<T>(path: string, fallback: T, timeoutMs = 3500) {
   try {
-    return await apiFetch<T>(path);
+    return await Promise.race([
+      apiFetch<T>(path),
+      new Promise<T>((resolve) => setTimeout(() => resolve(fallback), timeoutMs)),
+    ]);
   } catch {
     return fallback;
   }
@@ -69,7 +83,7 @@ async function optionalApiFetch<T>(path: string, fallback: T) {
 export default async function DashboardPage({ params }: { params: Promise<{ locale: string }> }) {
   const { locale } = await params;
   const t = await getTranslations();
-  const [summary, workspace, integrations, draftActions, costing] = await Promise.all([
+  const [summary, workspace, integrations, draftActions, costing, shopifyRuns] = await Promise.all([
     optionalApiFetch<DashboardSummary>('/api/v1/dashboard/summary', EMPTY_SUMMARY),
     getWorkspaceSettings().catch(() => ({ baseCurrency: 'USD' })),
     optionalApiFetch<IntegrationStatus[]>('/api/v1/integrations', []),
@@ -79,6 +93,7 @@ export default async function DashboardPage({ params }: { params: Promise<{ loca
       grossMarginPercent: 0,
       productsMissingCost: 0,
     }),
+    optionalApiFetch<SyncRun[]>('/api/v1/integrations/shopify/sync-runs', [], 1200),
   ]);
   const connectedChannels = integrations.filter(
     (integration) => integration.status === 'CONNECTED',
@@ -90,6 +105,11 @@ export default async function DashboardPage({ params }: { params: Promise<{ loca
     ['DRAFT', 'PENDING_APPROVAL'].includes(action.status),
   );
   const shopify = integrations.find((integration) => integration.provider === 'SHOPIFY');
+  const lastShopifySuccess = shopifyRuns.find((run) => run.status === 'SUCCESS' && !run.dryRun);
+  const shopifyTotals = syncRunTotals(lastShopifySuccess);
+  const shopifyWarnings = Array.isArray(lastShopifySuccess?.outputSnapshot?.warnings)
+    ? lastShopifySuccess.outputSnapshot.warnings.map(String)
+    : [];
   const meta = integrations.find((integration) => integration.provider === 'META_ADS');
   const alerts = [
     summary.workQueues.pendingConfirmation
@@ -404,6 +424,37 @@ export default async function DashboardPage({ params }: { params: Promise<{ loca
 
         <SurfaceCard>
           <SectionHeader
+            title="Shopify trust status"
+            description="Latest read-only import signal from the connected store."
+            actions={
+              <StatusBadge tone={shopify?.status === 'CONNECTED' ? 'success' : 'warning'}>
+                {shopify?.status ?? 'DISCONNECTED'}
+              </StatusBadge>
+            }
+          />
+          <div className="snapshot-grid" style={{ marginTop: 16 }}>
+            <div>
+              <span className="metric-label">Connected shop</span>
+              <strong>
+                {String(
+                  (shopify?.config?.shop as Record<string, unknown> | undefined)?.name ??
+                    'Not connected',
+                )}
+              </strong>
+            </div>
+            <div>
+              <span className="metric-label">Imported orders</span>
+              <strong>{String(shopifyTotals?.orders ?? 'Pending')}</strong>
+            </div>
+            <div>
+              <span className="metric-label">Warnings</span>
+              <strong>{shopifyWarnings.length}</strong>
+            </div>
+          </div>
+        </SurfaceCard>
+
+        <SurfaceCard>
+          <SectionHeader
             title="Automation cockpit"
             description="Provider readiness and approval-gated actions."
             actions={<StatusBadge tone="info">Dry-run first</StatusBadge>}
@@ -437,4 +488,19 @@ export default async function DashboardPage({ params }: { params: Promise<{ loca
       </section>
     </div>
   );
+}
+
+function syncRunTotals(run?: SyncRun) {
+  const output = run?.outputSnapshot;
+  if (!output) return null;
+  const totals = output.totals;
+  if (totals && typeof totals === 'object') return totals as Record<string, unknown>;
+  return ['products', 'customers', 'orders'].reduce<Record<string, unknown>>((acc, key) => {
+    const value = output[key];
+    if (typeof value === 'number') acc[key] = value;
+    if (value && typeof value === 'object' && 'found' in value) {
+      acc[key] = (value as { found?: unknown }).found ?? 0;
+    }
+    return acc;
+  }, {});
 }

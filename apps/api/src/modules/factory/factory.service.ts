@@ -79,6 +79,37 @@ export class FactoryService {
     });
   }
 
+  listMissingCostProducts(organizationId: string, query: Record<string, unknown>) {
+    const search = optionalText(query.search);
+    const source = optionalText(query.source);
+    return this.prisma.product.findMany({
+      where: {
+        organizationId,
+        isActive: true,
+        productCosts: { none: { active: true } },
+        ...(source === 'shopify' ? { externalId: { startsWith: 'shopify-product-' } } : {}),
+        ...(search
+          ? {
+              OR: [
+                { name: { contains: search } },
+                { sku: { contains: search } },
+                { externalId: { contains: search } },
+              ],
+            }
+          : {}),
+      },
+      include: {
+        _count: {
+          select: {
+            orderItems: true,
+          },
+        },
+      },
+      orderBy: [{ updatedAt: 'desc' }, { name: 'asc' }],
+      take: 100,
+    });
+  }
+
   async upsertProductCost(organizationId: string, body: Record<string, unknown>) {
     const productId = text(body.productId, '');
     if (!productId) throw new BadRequestException('productId is required');
@@ -90,6 +121,60 @@ export class FactoryService {
       data: productCostCreateData(organizationId, body),
       include: { product: true, factory: true },
     });
+  }
+
+  async bulkCompleteProductCosts(organizationId: string, body: Record<string, unknown>) {
+    const productIds = Array.isArray(body.productIds) ? body.productIds.map(String) : [];
+    if (!productIds.length) throw new BadRequestException('Select at least one product');
+
+    const products = await this.prisma.product.findMany({
+      where: { organizationId, id: { in: productIds } },
+      select: { id: true, sku: true },
+    });
+    if (!products.length) throw new NotFoundException('No products found');
+
+    const firstProduct = products[0];
+    if (!firstProduct) throw new NotFoundException('No products found');
+
+    const costs = productCostCreateData(organizationId, {
+      ...body,
+      productId: firstProduct.id,
+    });
+    const created = [];
+    for (const product of products) {
+      const cost = await this.prisma.productCost.create({
+        data: {
+          ...costs,
+          productId: product.id,
+        },
+      });
+      created.push(cost);
+    }
+
+    const productIdSet = products.map((product) => product.id);
+    const skus = products.map((product) => product.sku).filter(Boolean) as string[];
+    const affectedOrders = await this.prisma.order.findMany({
+      where: {
+        organizationId,
+        items: {
+          some: {
+            OR: [
+              { productId: { in: productIdSet } },
+              ...(skus.length ? [{ sku: { in: skus } }] : []),
+            ],
+          },
+        },
+      },
+      select: { id: true },
+    });
+    for (const order of affectedOrders) await this.recalculateOrder(organizationId, order.id);
+
+    const firstCreatedCost = created[0];
+    return {
+      created: created.length,
+      affectedOrders: affectedOrders.length,
+      totalUnitCost: firstCreatedCost ? Number(firstCreatedCost.totalUnitCost) : 0,
+    };
   }
 
   updateProductCost(organizationId: string, id: string, body: Record<string, unknown>) {
@@ -139,12 +224,13 @@ export class FactoryService {
   }
 
   async summary(organizationId: string) {
-    const [snapshots, expenses, productsMissingCost] = await Promise.all([
+    const [snapshots, expenses, productsMissingCost, totalProducts] = await Promise.all([
       this.prisma.orderCostSnapshot.findMany({ where: { organizationId }, take: 250 }),
       this.prisma.operatingExpense.findMany({ where: { organizationId, active: true } }),
       this.prisma.product.count({
         where: { organizationId, productCosts: { none: { active: true } } },
       }),
+      this.prisma.product.count({ where: { organizationId, isActive: true } }),
     ]);
     const revenue = sum(snapshots.map((item) => item.revenue));
     const totalCost = sum(snapshots.map((item) => item.totalCost));
@@ -157,6 +243,8 @@ export class FactoryService {
       expenses: sum(expenses.map((item) => item.amount)),
       snapshots: snapshots.length,
       productsMissingCost,
+      totalProducts,
+      costedProducts: Math.max(totalProducts - productsMissingCost, 0),
     };
   }
 
@@ -175,17 +263,37 @@ export class FactoryService {
         where: {
           organizationId,
           active: true,
-          productId: { in: order.items.map((item) => item.productId).filter(Boolean) as string[] },
+          OR: [
+            {
+              productId: {
+                in: order.items.map((item) => item.productId).filter(Boolean) as string[],
+              },
+            },
+            {
+              product: {
+                sku: { in: order.items.map((item) => item.sku).filter(Boolean) as string[] },
+              },
+            },
+          ],
         },
+        include: { product: true },
       }),
     ]);
     const costByProduct = new Map(
       costs.map((cost) => [cost.productId, Number(cost.totalUnitCost)]),
     );
+    const costBySku = new Map(
+      costs
+        .filter((cost) => cost.product?.sku)
+        .map((cost) => [cost.product.sku as string, Number(cost.totalUnitCost)]),
+    );
     const productCostTotal = order.items.reduce(
       (total, item) =>
         total +
-        Number(item.quantity) * (item.productId ? (costByProduct.get(item.productId) ?? 0) : 0),
+        Number(item.quantity) *
+          (item.productId
+            ? (costByProduct.get(item.productId) ?? costBySku.get(item.sku ?? '') ?? 0)
+            : (costBySku.get(item.sku ?? '') ?? 0)),
       0,
     );
     const revenue = Number(order.totalAmount);

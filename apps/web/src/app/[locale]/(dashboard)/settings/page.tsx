@@ -48,9 +48,12 @@ const FALLBACK_INTEGRATIONS: Integration[] = [
   { provider: 'INSTAGRAM', label: 'Instagram', status: 'DISCONNECTED', mode: 'DRAFT_ACTIONS' },
 ];
 
-async function optionalApiFetch<T>(path: string, fallback: T) {
+async function optionalApiFetch<T>(path: string, fallback: T, timeoutMs = 2500) {
   try {
-    return await apiFetch<T>(path);
+    return await Promise.race([
+      apiFetch<T>(path),
+      new Promise<T>((resolve) => setTimeout(() => resolve(fallback), timeoutMs)),
+    ]);
   } catch {
     return fallback;
   }
@@ -145,7 +148,7 @@ export default async function SettingsPage({ params }: { params: Promise<{ local
   const [organization, integrations, shopifySyncRuns] = await Promise.all([
     apiFetch<Organization>('/api/v1/settings/organization'),
     optionalApiFetch<Integration[]>('/api/v1/integrations', FALLBACK_INTEGRATIONS),
-    optionalApiFetch<SyncRun[]>('/api/v1/integrations/shopify/sync-runs', []),
+    optionalApiFetch<SyncRun[]>('/api/v1/integrations/shopify/sync-runs', [], 1200),
   ]);
   const connectedCount = integrations.filter(
     (integration) => integration.status === 'CONNECTED',
@@ -297,6 +300,12 @@ export default async function SettingsPage({ params }: { params: Promise<{ local
             const scopeWarnings = Array.isArray(integration.config?.scopeWarnings)
               ? integration.config.scopeWarnings.map(String)
               : [];
+            const scopeReport = integration.config?.scopeReport as
+              | {
+                  broaderGranted?: string[];
+                  historicalOrders?: { satisfied?: boolean };
+                }
+              | undefined;
             const shop = integration.config?.shop as Record<string, unknown> | undefined;
             return (
               <div className="queue-card" key={integration.provider}>
@@ -489,6 +498,15 @@ export default async function SettingsPage({ params }: { params: Promise<{ local
                     {scopeWarnings.length ? (
                       <p>Scope warnings: {scopeWarnings.join(', ')}</p>
                     ) : null}
+                    {scopeReport?.broaderGranted?.length ? (
+                      <p>Broader grants accepted: {scopeReport.broaderGranted.join(', ')}</p>
+                    ) : null}
+                    {scopeReport?.historicalOrders ? (
+                      <p>
+                        Historical order access:{' '}
+                        {scopeReport.historicalOrders.satisfied ? 'available' : 'limited window'}
+                      </p>
+                    ) : null}
                     {integration.config?.lastTestAt ? (
                       <p>
                         Last test:{' '}
@@ -540,9 +558,7 @@ export default async function SettingsPage({ params }: { params: Promise<{ local
                             </div>
                             {totals ? (
                               <StatusBadge tone={run.status === 'FAILED' ? 'danger' : 'info'}>
-                                {Object.entries(totals)
-                                  .map(([key, value]) => `${key}: ${String(value)}`)
-                                  .join(' - ')}
+                                {formatSyncTotals(totals)}
                               </StatusBadge>
                             ) : (
                               <StatusBadge tone={run.status === 'FAILED' ? 'danger' : 'muted'}>
@@ -576,6 +592,7 @@ function syncRunTotals(run: SyncRun) {
     (totals, key) => {
       const value = output[key];
       if (typeof value === 'number') totals[key] = value;
+      if (value && typeof value === 'object' && 'found' in value) totals[key] = value;
       return totals;
     },
     {},
@@ -586,4 +603,16 @@ function syncRunTotals(run: SyncRun) {
   return nestedTotals && typeof nestedTotals === 'object'
     ? (nestedTotals as Record<string, unknown>)
     : null;
+}
+
+function formatSyncTotals(totals: Record<string, unknown>) {
+  return Object.entries(totals)
+    .map(([key, value]) => {
+      if (value && typeof value === 'object' && 'found' in value) {
+        const item = value as Record<string, unknown>;
+        return `${key}: ${String(item.found ?? 0)} found, ${String(item.created ?? 0)} new, ${String(item.updated ?? 0)} updated, ${String(item.failed ?? 0)} failed`;
+      }
+      return `${key}: ${String(value)}`;
+    })
+    .join(' - ');
 }

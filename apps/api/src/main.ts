@@ -2,6 +2,7 @@ import 'reflect-metadata';
 import { NestFactory } from '@nestjs/core';
 import { ValidationPipe } from '@nestjs/common';
 import { SwaggerModule, DocumentBuilder } from '@nestjs/swagger';
+import type { NextFunction, Request, Response } from 'express';
 import { AppModule } from './app.module';
 
 async function bootstrap() {
@@ -11,6 +12,25 @@ async function bootstrap() {
   app.enableCors({
     origin: process.env.CORS_ORIGIN || process.env.AUTH_URL || 'http://localhost:3000',
     credentials: true,
+  });
+
+  app.use((req: Request, res: Response, next: NextFunction) => {
+    const start = Date.now();
+    res.on('finish', () => {
+      const duration = Date.now() - start;
+      if (duration > 1500) {
+        console.warn(
+          JSON.stringify({
+            event: 'slow_request',
+            method: req.method,
+            path: req.path,
+            statusCode: res.statusCode,
+            durationMs: duration,
+          }),
+        );
+      }
+    });
+    next();
   });
 
   // Global validation pipe

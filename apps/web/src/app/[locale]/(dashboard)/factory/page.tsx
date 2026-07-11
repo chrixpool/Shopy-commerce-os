@@ -21,10 +21,14 @@ interface FactoryRecord {
 
 interface ProductRecord {
   id: string;
+  externalId?: string | null;
   name: string;
   sku?: string | null;
   price: string | number;
   stock: number;
+  _count?: {
+    orderItems: number;
+  };
 }
 
 interface ProductCostRecord {
@@ -113,6 +117,32 @@ async function createProductCost(formData: FormData) {
   revalidatePath('/[locale]/finance', 'page');
 }
 
+async function bulkCompleteProductCosts(formData: FormData) {
+  'use server';
+
+  const productIds = formData.getAll('productIds').map(String);
+  await apiFetch('/api/v1/product-costs/bulk-complete', {
+    method: 'POST',
+    body: JSON.stringify({
+      productIds,
+      factoryId: String(formData.get('factoryId') ?? '') || undefined,
+      sewingCost: Number(formData.get('sewingCost') ?? 0),
+      fabricCost: Number(formData.get('fabricCost') ?? 0),
+      accessoryCost: Number(formData.get('accessoryCost') ?? 0),
+      packagingCost: Number(formData.get('packagingCost') ?? 0),
+      otherVariableCost: Number(formData.get('otherVariableCost') ?? 0),
+      overheadAllocation: Number(formData.get('overheadAllocation') ?? 0),
+      currency: String(formData.get('currency') ?? 'USD'),
+      notes: String(formData.get('notes') ?? ''),
+    }),
+  });
+
+  revalidatePath('/[locale]/factory', 'page');
+  revalidatePath('/[locale]/finance', 'page');
+  revalidatePath('/[locale]/orders', 'page');
+  revalidatePath('/[locale]/dashboard', 'page');
+}
+
 async function createCostComponent(formData: FormData) {
   'use server';
 
@@ -168,16 +198,25 @@ function percent(value: number) {
 
 export default async function FactoryPage({ params }: { params: Promise<{ locale: string }> }) {
   const { locale } = await params;
-  const [workspace, factories, products, productCosts, components, expenses, summary] =
-    await Promise.all([
-      getWorkspaceSettings(),
-      apiFetch<FactoryRecord[]>('/api/v1/factory'),
-      apiFetch<ProductRecord[]>('/api/v1/inventory/products'),
-      apiFetch<ProductCostRecord[]>('/api/v1/product-costs'),
-      apiFetch<CostComponentRecord[]>('/api/v1/cost-components'),
-      apiFetch<ExpenseRecord[]>('/api/v1/expenses'),
-      apiFetch<CostingSummary>('/api/v1/costing/summary'),
-    ]);
+  const [
+    workspace,
+    factories,
+    products,
+    missingProducts,
+    productCosts,
+    components,
+    expenses,
+    summary,
+  ] = await Promise.all([
+    getWorkspaceSettings(),
+    apiFetch<FactoryRecord[]>('/api/v1/factory'),
+    apiFetch<ProductRecord[]>('/api/v1/inventory/products'),
+    apiFetch<ProductRecord[]>('/api/v1/product-costs/missing?source=shopify'),
+    apiFetch<ProductCostRecord[]>('/api/v1/product-costs'),
+    apiFetch<CostComponentRecord[]>('/api/v1/cost-components'),
+    apiFetch<ExpenseRecord[]>('/api/v1/expenses'),
+    apiFetch<CostingSummary>('/api/v1/costing/summary'),
+  ]);
 
   const activeExpenses = expenses.filter((expense) => expense.active);
   const pricedProducts = productCosts.slice(0, 6).map((cost) => {
@@ -241,6 +280,13 @@ export default async function FactoryPage({ params }: { params: Promise<{ locale
           badgeTone={summary.productsMissingCost ? 'warning' : 'success'}
         />
         <MetricCard
+          label="Completion"
+          value={`${Math.max(0, Math.round(((products.length - summary.productsMissingCost) / Math.max(products.length, 1)) * 100))}%`}
+          help="Products with active cost records."
+          badge="Beta"
+          badgeTone="info"
+        />
+        <MetricCard
           label="Factories"
           value={String(factories.filter((factory) => factory.active).length)}
           help="Active supplier or production partners."
@@ -248,6 +294,120 @@ export default async function FactoryPage({ params }: { params: Promise<{ locale
           badgeTone="info"
         />
       </section>
+
+      <SurfaceCard>
+        <SectionHeader
+          title="Missing-cost completion queue"
+          description="Select imported products, apply one cost structure, and recalculate affected order margins immediately."
+          actions={
+            <StatusBadge tone={missingProducts.length ? 'warning' : 'success'}>
+              {missingProducts.length} open
+            </StatusBadge>
+          }
+        />
+        {missingProducts.length ? (
+          <form
+            action={bulkCompleteProductCosts}
+            className="form-grid compact-form"
+            style={{ marginTop: 18 }}
+          >
+            <div className="table-wrap" style={{ gridColumn: '1 / -1' }}>
+              <table className="data-table">
+                <thead>
+                  <tr>
+                    <th>Select</th>
+                    <th>Product</th>
+                    <th>Source</th>
+                    <th>Retail</th>
+                    <th>Affected order items</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {missingProducts.slice(0, 12).map((product) => (
+                    <tr key={product.id}>
+                      <td>
+                        <input name="productIds" type="checkbox" value={product.id} />
+                      </td>
+                      <td>
+                        <div className="strong-cell">{product.name}</div>
+                        <div>{product.sku ?? 'No SKU'}</div>
+                      </td>
+                      <td>
+                        <StatusBadge
+                          tone={product.externalId?.startsWith('shopify') ? 'info' : 'muted'}
+                        >
+                          {product.externalId?.startsWith('shopify') ? 'Shopify' : 'Manual'}
+                        </StatusBadge>
+                      </td>
+                      <td>{formatMoney(product.price, workspace.baseCurrency, locale)}</td>
+                      <td>{product._count?.orderItems ?? 0}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <label className="form-field">
+              <span>Factory</span>
+              <select className="select-field" name="factoryId">
+                <option value="">No factory</option>
+                {factories.map((factory) => (
+                  <option key={factory.id} value={factory.id}>
+                    {factory.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+            {[
+              ['sewingCost', 'Sewing'],
+              ['fabricCost', 'Fabric'],
+              ['accessoryCost', 'Accessories'],
+              ['packagingCost', 'Packaging'],
+              ['otherVariableCost', 'Other'],
+              ['overheadAllocation', 'Overhead'],
+            ].map(([name, label]) => (
+              <label className="form-field" key={name}>
+                <span>{label}</span>
+                <input className="field" name={name} type="number" min="0" step="0.01" />
+              </label>
+            ))}
+            <label className="form-field">
+              <span>Target margin</span>
+              <input
+                className="field"
+                name="targetMargin"
+                type="number"
+                min="0"
+                max="95"
+                step="1"
+                placeholder="55"
+              />
+              <small className="field-help">
+                Use this to price-check manually after save. Shopy does not convert currencies.
+              </small>
+            </label>
+            <input name="currency" type="hidden" value={workspace.baseCurrency} />
+            <label className="form-field" style={{ gridColumn: '1 / -1' }}>
+              <span>Notes</span>
+              <input
+                className="field"
+                name="notes"
+                placeholder="Applied from bulk completion queue"
+              />
+            </label>
+            <div className="form-actions">
+              <button className="button button-primary" type="submit">
+                Save selected costs and recalculate
+              </button>
+            </div>
+          </form>
+        ) : (
+          <EmptyState
+            icon="OK"
+            title="All visible products have costs"
+            description="New Shopify imports without costs will appear here automatically."
+          />
+        )}
+      </SurfaceCard>
 
       <section className="panel-grid">
         <form action={createFactory} className="card card-padded form-grid">

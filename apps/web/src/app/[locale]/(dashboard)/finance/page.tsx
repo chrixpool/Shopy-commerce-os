@@ -37,6 +37,8 @@ interface CostingSummary {
   expenses: number;
   snapshots: number;
   productsMissingCost: number;
+  totalProducts?: number;
+  costedProducts?: number;
 }
 
 function amount(value: string | number) {
@@ -64,6 +66,8 @@ export default async function FinancePage({ params }: { params: Promise<{ locale
       expenses: 0,
       snapshots: 0,
       productsMissingCost: 0,
+      totalProducts: 0,
+      costedProducts: 0,
     }),
   ]);
 
@@ -77,6 +81,10 @@ export default async function FinancePage({ params }: { params: Promise<{ locale
   const cancelledValue = cancelled.reduce((total, order) => total + amount(order.totalAmount), 0);
   const activeValue = active.reduce((total, order) => total + amount(order.totalAmount), 0);
   const averageOrderValue = summary.totalOrders > 0 ? summary.revenue / summary.totalOrders : 0;
+  const completeness =
+    Number(costing.totalProducts ?? 0) > 0
+      ? Math.round((Number(costing.costedProducts ?? 0) / Number(costing.totalProducts)) * 100)
+      : 0;
   const recentFinancialOrders = orders.data.slice(0, 8);
 
   return (
@@ -120,6 +128,13 @@ export default async function FinancePage({ params }: { params: Promise<{ locale
           help={`${costing.snapshots} order margin snapshot(s) calculated.`}
           badge="Costing"
           badgeTone="info"
+        />
+        <MetricCard
+          label="Cost completeness"
+          value={`${completeness}%`}
+          help={`${costing.productsMissingCost} product(s) still missing unit costs.`}
+          badge={costing.productsMissingCost ? 'Action' : 'Ready'}
+          badgeTone={costing.productsMissingCost ? 'warning' : 'success'}
         />
         <MetricCard
           label="Gross margin"

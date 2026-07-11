@@ -38,6 +38,20 @@ const SHOPIFY_REQUIRED_SCOPES = [
 ];
 const SHOPIFY_FULL_HISTORY_SCOPE = 'read_all_orders';
 
+interface ShopifyResourceSyncStats {
+  found: number;
+  created: number;
+  updated: number;
+  skipped: number;
+  failed: number;
+}
+
+interface ShopifySyncStats {
+  products: ShopifyResourceSyncStats;
+  customers: ShopifyResourceSyncStats;
+  orders: ShopifyResourceSyncStats;
+}
+
 type ShopifyConnectionMethod = 'CLIENT_CREDENTIALS' | 'ADMIN_TOKEN';
 
 @Injectable()
@@ -333,7 +347,8 @@ export class IntegrationsService {
     nextConfig.tokenExpiresAt = token.expiresIn
       ? new Date(Date.now() + token.expiresIn * 1000).toISOString()
       : null;
-    nextConfig.scopeWarnings = missingShopifyScopes(token.scopes);
+    nextConfig.scopeReport = shopifyScopeReport(token.scopes);
+    nextConfig.scopeWarnings = shopifyScopeWarnings(token.scopes);
 
     return { config: nextConfig, encryptedCredentials: nextEncryptedCredentials };
   }
@@ -396,10 +411,15 @@ export class IntegrationsService {
     },
     dryRun: boolean,
   ) {
+    const startedAt = new Date();
     const accessToken = await this.shopifyAccessToken(connection.config, connection.credentials);
     if (!accessToken) throw new BadRequestException('Shopify Admin API access token is required.');
     const shopDomain = normalizeShopDomain(String(connection.config.shopDomain ?? ''));
+    if (!shopDomain) throw new BadRequestException('Shopify shop domain is required.');
     const maxPages = Number(process.env.SHOPIFY_MAX_SYNC_PAGES || 20);
+    const scopeReport = shopifyScopeReport(
+      Array.isArray(connection.config.scopes) ? connection.config.scopes.map(String) : [],
+    );
 
     const [products, customers, orders] = await Promise.all([
       shopifyFetchAll<ShopifyProduct, ShopifyProductsResponse>(
@@ -428,45 +448,53 @@ export class IntegrationsService {
     const warnings = [
       ...(await this.shopifyCurrencyWarnings(connection.organizationId, orders.items)),
       ...shopifyPaginationWarnings({ products, customers, orders }, maxPages),
-      ...shopifyHistoryScopeWarnings(connection.config),
+      ...shopifyHistoryScopeWarnings(scopeReport),
     ];
-
-    const run = await this.prisma.automationRun.create({
-      data: {
-        organizationId: connection.organizationId,
-        status: 'SUCCESS',
-        dryRun,
-        inputSnapshot: {
-          provider: IntegrationProvider.SHOPIFY,
-          type: dryRun ? 'DRY_RUN' : 'MANUAL_SYNC',
-        },
-        outputSnapshot: {
-          shopDomain,
-          products: products.items.length,
-          customers: customers.items.length,
-          orders: orders.items.length,
-          pages: {
-            products: products.pages,
-            customers: customers.pages,
-            orders: orders.pages,
-          },
-          warnings,
-        },
-        finishedAt: new Date(),
-      },
-    });
+    const syncRange = {
+      mode: scopeReport.historicalOrders.satisfied
+        ? 'all_available_orders'
+        : 'shopify_recent_window',
+      maxPages,
+    };
 
     if (dryRun) {
+      const stats = shopifyDryRunStats({
+        products: products.items.length,
+        customers: customers.items.length,
+        orders: orders.items.length,
+      });
+      const run = await this.prisma.automationRun.create({
+        data: {
+          organizationId: connection.organizationId,
+          status: 'SUCCESS',
+          dryRun,
+          startedAt,
+          inputSnapshot: {
+            provider: IntegrationProvider.SHOPIFY,
+            type: 'DRY_RUN',
+          },
+          outputSnapshot: shopifySyncOutput({
+            shopDomain,
+            stats,
+            pages: {
+              products: products.pages,
+              customers: customers.pages,
+              orders: orders.pages,
+            },
+            warnings,
+            syncRange,
+            startedAt,
+            finishedAt: new Date(),
+          }) as unknown as Prisma.InputJsonObject,
+          finishedAt: new Date(),
+        },
+      });
       return {
         provider: IntegrationProvider.SHOPIFY,
         dryRun,
         summary:
           'Shopify dry-run completed. No records were imported and no Shopify writes were made.',
-        counts: {
-          products: products.items.length,
-          customers: customers.items.length,
-          orders: orders.items.length,
-        },
+        counts: stats,
         warnings,
         runId: run.id,
       };
@@ -478,27 +506,57 @@ export class IntegrationsService {
       customers.items,
       orders.items,
     );
+    const finishedAt = new Date();
+    const run = await this.prisma.automationRun.create({
+      data: {
+        organizationId: connection.organizationId,
+        status: shopifyRunStatus(imported, warnings),
+        dryRun,
+        startedAt,
+        inputSnapshot: {
+          provider: IntegrationProvider.SHOPIFY,
+          type: 'MANUAL_SYNC',
+        },
+        outputSnapshot: shopifySyncOutput({
+          shopDomain,
+          stats: imported,
+          pages: {
+            products: products.pages,
+            customers: customers.pages,
+            orders: orders.pages,
+          },
+          warnings,
+          syncRange,
+          startedAt,
+          finishedAt,
+        }) as unknown as Prisma.InputJsonObject,
+        finishedAt,
+      },
+    });
     await this.prisma.integration.update({
       where: { id: integrationId },
       data: {
         isActive: true,
         status: IntegrationStatus.CONNECTED,
-        lastSyncAt: new Date(),
+        lastSyncAt: finishedAt,
         errorMessage: null,
         config: {
           ...connection.config,
           lastSyncTotals: imported,
           lastSyncRunId: run.id,
           shopDomain,
-        } as Prisma.InputJsonValue,
+          scopeReport,
+          scopeWarnings: shopifyScopeWarnings(
+            Array.isArray(connection.config.scopes) ? connection.config.scopes.map(String) : [],
+          ),
+        } as unknown as Prisma.InputJsonObject,
       },
     });
 
     return {
       provider: IntegrationProvider.SHOPIFY,
       dryRun,
-      summary:
-        'Shopify sync imported products, customers, and orders. No Shopify writes were made.',
+      summary: 'Shopify sync completed. No Shopify writes were made.',
       counts: imported,
       warnings,
       runId: run.id,
@@ -526,17 +584,24 @@ export class IntegrationsService {
     customers: ShopifyCustomer[],
     orders: ShopifyOrder[],
   ) {
-    let importedProducts = 0;
-    let importedCustomers = 0;
-    let importedOrders = 0;
+    const stats: ShopifySyncStats = {
+      products: resourceStats(products.length),
+      customers: resourceStats(customers.length),
+      orders: resourceStats(orders.length),
+    };
 
     for (const product of products) {
       const variant = product.variants?.[0];
+      const externalId = `shopify-product-${product.id}`;
+      const existing = await this.prisma.product.findUnique({
+        where: { organizationId_externalId: { organizationId, externalId } },
+        select: { id: true },
+      });
       await this.prisma.product.upsert({
         where: {
           organizationId_externalId: {
             organizationId,
-            externalId: `shopify-product-${product.id}`,
+            externalId,
           },
         },
         update: {
@@ -566,12 +631,15 @@ export class IntegrationsService {
           },
         },
       });
-      importedProducts += 1;
+      if (existing) stats.products.updated += 1;
+      else stats.products.created += 1;
     }
 
     for (const customer of customers) {
+      const existed = await shopifyCustomerExists(this.prisma, organizationId, customer);
       await upsertShopifyCustomer(this.prisma, organizationId, customer);
-      importedCustomers += 1;
+      if (existed) stats.customers.updated += 1;
+      else stats.customers.created += 1;
     }
 
     for (const order of orders) {
@@ -626,6 +694,7 @@ export class IntegrationsService {
           where: { id: existingOrder.id },
           data: orderData,
         });
+        stats.orders.updated += 1;
       } else {
         await this.prisma.order.create({
           data: {
@@ -654,11 +723,11 @@ export class IntegrationsService {
             confirmationTask: { create: { status: 'PENDING' } },
           },
         });
+        stats.orders.created += 1;
       }
-      importedOrders += 1;
     }
 
-    return { products: importedProducts, customers: importedCustomers, orders: importedOrders };
+    return stats;
   }
 
   async handleShopifyWebhook(
@@ -985,8 +1054,11 @@ function shopifyPaginationWarnings(
 }
 
 function shopifyHistoryScopeWarnings(config: Record<string, unknown>) {
-  const scopes = Array.isArray(config.scopes) ? config.scopes.map(String) : [];
-  if (scopes.includes(SHOPIFY_FULL_HISTORY_SCOPE)) return [];
+  const report =
+    'historicalOrders' in config
+      ? (config as ReturnType<typeof shopifyScopeReport>)
+      : shopifyScopeReport(Array.isArray(config.scopes) ? config.scopes.map(String) : []);
+  if (report.historicalOrders.satisfied) return [];
   return [
     `For complete historical order import beyond Shopify's normal recent-order window, grant ${SHOPIFY_FULL_HISTORY_SCOPE} to the Shopify app/token if your store plan and app permissions allow it.`,
   ];
@@ -1048,8 +1120,100 @@ function shopifyTokenExchangeError(status: number, body: unknown) {
   return `Shopify client credentials exchange failed with ${status}. Check store domain, app installation, credentials, and scopes.`;
 }
 
-function missingShopifyScopes(scopes: string[]) {
-  return SHOPIFY_REQUIRED_SCOPES.filter((scope) => !scopes.includes(scope));
+function normalizeShopifyScope(scope: string) {
+  return scope.trim().toLowerCase();
+}
+
+function shopifyScopeReport(scopes: string[]) {
+  const granted = Array.from(new Set(scopes.map(normalizeShopifyScope).filter(Boolean)));
+  const satisfies = (scope: string) => {
+    const normalized = normalizeShopifyScope(scope);
+    const writeEquivalent = normalized.replace(/^read_/, 'write_');
+    const customerEquivalent = normalized.replace(/^read_/, 'customer_read_');
+    const customerWriteEquivalent = normalized.replace(/^read_/, 'customer_write_');
+    const satisfiedBy = granted.find((grant) =>
+      [normalized, writeEquivalent, customerEquivalent, customerWriteEquivalent].includes(grant),
+    );
+    return {
+      scope: normalized,
+      satisfied: Boolean(satisfiedBy),
+      satisfiedBy: satisfiedBy ?? null,
+      broaderGrant: Boolean(satisfiedBy && satisfiedBy !== normalized),
+    };
+  };
+  const required = SHOPIFY_REQUIRED_SCOPES.map(satisfies);
+  const historicalOrders = satisfies(SHOPIFY_FULL_HISTORY_SCOPE);
+  return {
+    granted,
+    required,
+    missingRequired: required.filter((item) => !item.satisfied).map((item) => item.scope),
+    broaderGranted: required
+      .filter((item) => item.broaderGrant)
+      .map((item) => `${item.scope} satisfied by ${item.satisfiedBy}`),
+    historicalOrders,
+  };
+}
+
+function shopifyScopeWarnings(scopes: string[]) {
+  const report = shopifyScopeReport(scopes);
+  return [
+    ...report.missingRequired.map((scope) => `Required Shopify scope missing: ${scope}.`),
+    ...(report.historicalOrders.satisfied
+      ? []
+      : [
+          `Optional Shopify scope missing for full historical orders: ${SHOPIFY_FULL_HISTORY_SCOPE}.`,
+        ]),
+  ];
+}
+
+function resourceStats(found: number): ShopifyResourceSyncStats {
+  return { found, created: 0, updated: 0, skipped: 0, failed: 0 };
+}
+
+function shopifyDryRunStats(found: {
+  products: number;
+  customers: number;
+  orders: number;
+}): ShopifySyncStats {
+  return {
+    products: resourceStats(found.products),
+    customers: resourceStats(found.customers),
+    orders: resourceStats(found.orders),
+  };
+}
+
+function shopifyRunStatus(stats: ShopifySyncStats, _warnings: string[]): 'SUCCESS' | 'FAILED' {
+  const failed = Object.values(stats).some((item) => item.failed > 0);
+  if (failed) return 'FAILED';
+  return 'SUCCESS';
+}
+
+function shopifySyncOutput(input: {
+  shopDomain: string;
+  stats: ShopifySyncStats;
+  pages: Record<string, number>;
+  warnings: string[];
+  syncRange: Record<string, unknown>;
+  startedAt: Date;
+  finishedAt: Date;
+}) {
+  return {
+    shopDomain: input.shopDomain,
+    products: input.stats.products,
+    customers: input.stats.customers,
+    orders: input.stats.orders,
+    totals: {
+      products: input.stats.products.found,
+      customers: input.stats.customers.found,
+      orders: input.stats.orders.found,
+    },
+    pages: input.pages,
+    warnings: input.warnings,
+    syncRange: input.syncRange,
+    startedAt: input.startedAt.toISOString(),
+    finishedAt: input.finishedAt.toISOString(),
+    status: input.warnings.length ? 'success_with_warnings' : 'success',
+  };
 }
 
 function decimalFromString(value: unknown, fallback: number) {
@@ -1108,6 +1272,20 @@ async function upsertShopifyCustomer(
       address: address?.address1,
     },
   });
+}
+
+async function shopifyCustomerExists(
+  prisma: PrismaService,
+  organizationId: string,
+  customer: ShopifyCustomer,
+) {
+  const address = customer.default_address;
+  const phone = customer.phone || address?.phone || `shopify-${customer.id}`;
+  const existing = await prisma.customer.findUnique({
+    where: { organizationId_phone: { organizationId, phone } },
+    select: { id: true },
+  });
+  return Boolean(existing);
 }
 
 interface ShopifyProductsResponse {

@@ -1,12 +1,16 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { normalizeCurrencyCode, PlatformCurrencySchema } from '@shopy/shared';
-import { DeliveryStatus, OrderStatus } from '@prisma/client';
+import { DeliveryStatus, OrderStatus, Prisma } from '@prisma/client';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import type { CreateOrderDto } from './dto/create-order.dto';
 
 interface ListOrdersQuery {
   search?: string;
   status?: OrderStatus | 'all';
+  source?: string;
+  city?: string;
+  dateFrom?: string;
+  dateTo?: string;
   page?: number;
   limit?: number;
 }
@@ -15,15 +19,21 @@ interface ListOrdersQuery {
 export class OrdersService {
   constructor(private readonly prisma: PrismaService) {}
 
-  async list(organizationId: string, query: ListOrdersQuery) {
-    const page = Math.max(Number(query.page ?? 1), 1);
-    const limit = Math.min(Math.max(Number(query.limit ?? 25), 1), 100);
+  private orderWhere(organizationId: string, query: ListOrdersQuery): Prisma.OrderWhereInput {
     const status = query.status && query.status !== 'all' ? query.status : undefined;
     const search = query.search?.trim();
+    const source = query.source?.trim();
+    const city = query.city?.trim();
+    const createdAt: Prisma.DateTimeFilter = {};
+    if (query.dateFrom) createdAt.gte = new Date(query.dateFrom);
+    if (query.dateTo) createdAt.lte = new Date(query.dateTo);
 
-    const where = {
+    return {
       organizationId,
       ...(status ? { status } : {}),
+      ...(source && source !== 'all' ? { source } : {}),
+      ...(Object.keys(createdAt).length ? { createdAt } : {}),
+      ...(city ? { customer: { city: { contains: city } } } : {}),
       ...(search
         ? {
             OR: [
@@ -35,6 +45,12 @@ export class OrdersService {
           }
         : {}),
     };
+  }
+
+  async list(organizationId: string, query: ListOrdersQuery) {
+    const page = Math.max(Number(query.page ?? 1), 1);
+    const limit = Math.min(Math.max(Number(query.limit ?? 25), 1), 100);
+    const where = this.orderWhere(organizationId, query);
 
     const [data, total] = await Promise.all([
       this.prisma.order.findMany({
@@ -57,6 +73,63 @@ export class OrdersService {
       page,
       limit,
       totalPages: Math.max(Math.ceil(total / limit), 1),
+    };
+  }
+
+  async summary(organizationId: string, query: ListOrdersQuery) {
+    const where = this.orderWhere(organizationId, query);
+    const [totalOrders, revenue, statusCounts, sourceCounts, missingCostCount, confirmationCounts] =
+      await Promise.all([
+        this.prisma.order.count({ where }),
+        this.prisma.order.aggregate({ where, _sum: { totalAmount: true } }),
+        this.prisma.order.groupBy({
+          by: ['status'],
+          where,
+          _count: { _all: true },
+        }),
+        this.prisma.order.groupBy({
+          by: ['source'],
+          where,
+          _count: { _all: true },
+        }),
+        this.prisma.order.count({
+          where: {
+            ...where,
+            costSnapshot: null,
+          },
+        }),
+        this.prisma.confirmationTask.groupBy({
+          by: ['status'],
+          where: { order: where },
+          _count: { _all: true },
+        }),
+      ]);
+
+    const byStatus = statusCounts.reduce<Record<string, number>>((acc, item) => {
+      acc[item.status] = item._count._all;
+      return acc;
+    }, {});
+    const bySource = sourceCounts.reduce<Record<string, number>>((acc, item) => {
+      acc[item.source] = item._count._all;
+      return acc;
+    }, {});
+    const confirmationByStatus = confirmationCounts.reduce<Record<string, number>>((acc, item) => {
+      acc[item.status] = item._count._all;
+      return acc;
+    }, {});
+
+    return {
+      totalOrders,
+      totalRevenue: Number(revenue._sum.totalAmount ?? 0),
+      statusCounts: byStatus,
+      sourceCounts: bySource,
+      shopifyOrderCount: bySource.shopify ?? 0,
+      missingCostCount,
+      confirmationCounts: {
+        confirmed: confirmationByStatus.CONFIRMED ?? 0,
+        unreachable: confirmationByStatus.UNREACHABLE ?? 0,
+        cancelled: byStatus.CANCELLED ?? 0,
+      },
     };
   }
 
