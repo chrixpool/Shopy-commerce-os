@@ -1,6 +1,7 @@
 services:
   - type: web
     name: Shopy-api
+    branch: main
     runtime: node
     plan: free
     buildCommand: pnpm install --frozen-lockfile --prod=false && pnpm --filter @shopy/shared build && pnpm --filter @shopy/api db:generate && pnpm --filter @shopy/api build
@@ -22,6 +23,10 @@ services:
         sync: false
       - key: INTEGRATION_SECRET_KEY
         sync: false
+      - key: MES_COLIS_API_URL
+        value: https://api.mescolis.tn/api
+      - key: MES_COLIS_SOCKET_URL
+        value: https://api.mescolis.tn:4001
       - key: SHOPIFY_API_VERSION
         value: 2026-01
       - key: SHOPIFY_WEBHOOK_SECRET

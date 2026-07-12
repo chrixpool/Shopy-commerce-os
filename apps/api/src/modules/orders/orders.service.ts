@@ -3,6 +3,7 @@ import { normalizeCurrencyCode, PlatformCurrencySchema } from '@shopy/shared';
 import { DeliveryStatus, OrderStatus, Prisma } from '@prisma/client';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import type { CreateOrderDto } from './dto/create-order.dto';
+import { assertOrderTransition } from '../workflows/workflow-transitions';
 
 interface ListOrdersQuery {
   search?: string;
@@ -403,6 +404,7 @@ export class OrdersService {
       include: { confirmationTask: true, fulfillmentTask: true, parcel: true },
     });
     if (!order) throw new NotFoundException('Order not found');
+    assertOrderTransition(order.status, status);
 
     return this.prisma.$transaction(async (tx) => {
       const updated = await tx.order.update({

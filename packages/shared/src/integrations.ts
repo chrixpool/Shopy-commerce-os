@@ -5,6 +5,7 @@ export const INTEGRATION_PROVIDERS = [
   'META_ADS',
   'FACEBOOK_PAGE',
   'INSTAGRAM',
+  'MES_COLIS',
   'CSV',
   'MANUAL',
 ] as const;
@@ -86,6 +87,7 @@ export const PROVIDER_LABELS: Record<IntegrationProviderCode, string> = {
   META_ADS: 'Meta Ads',
   FACEBOOK_PAGE: 'Facebook Page',
   INSTAGRAM: 'Instagram',
+  MES_COLIS: 'Mes Colis',
   CSV: 'CSV import',
   MANUAL: 'Manual workflows',
 };

@@ -6,7 +6,14 @@ import type { NextFunction, Request, Response } from 'express';
 import { AppModule } from './app.module';
 
 async function bootstrap() {
+  if (process.env.NODE_ENV === 'production' && !process.env.API_INTERNAL_SECRET) {
+    throw new Error('API_INTERNAL_SECRET is required in production');
+  }
+  if (process.env.NODE_ENV !== 'production' && !process.env.API_INTERNAL_SECRET) {
+    process.env.API_INTERNAL_SECRET = 'local-development-only-secret';
+  }
   const app = await NestFactory.create(AppModule, { rawBody: true });
+  app.getHttpAdapter().getInstance().set('trust proxy', 1);
 
   // CORS — only allow from Next.js frontend
   app.enableCors({
@@ -30,6 +37,25 @@ async function bootstrap() {
         );
       }
     });
+    next();
+  });
+
+  const rateBuckets = new Map<string, { count: number; resetAt: number }>();
+  app.use((req: Request, res: Response, next: NextFunction) => {
+    const policy = rateLimitPolicy(req.path, req.method);
+    if (!policy) return next();
+    const now = Date.now();
+    const actor = String(req.headers['x-user-id'] ?? req.ip ?? 'anonymous');
+    const key = `${actor}:${req.method}:${req.path}`;
+    const current = rateBuckets.get(key);
+    const bucket =
+      !current || current.resetAt <= now ? { count: 0, resetAt: now + policy.windowMs } : current;
+    bucket.count += 1;
+    rateBuckets.set(key, bucket);
+    if (bucket.count > policy.limit) {
+      res.setHeader('Retry-After', Math.ceil((bucket.resetAt - now) / 1000));
+      return res.status(429).json({ message: 'Too many requests. Please retry shortly.' });
+    }
     next();
   });
 
@@ -66,3 +92,19 @@ async function bootstrap() {
 }
 
 bootstrap();
+
+function rateLimitPolicy(path: string, method: string) {
+  if (method === 'POST' && /^\/api\/v1\/auth\/(validate|register)$/.test(path)) {
+    return { limit: 10, windowMs: 60_000 };
+  }
+  if (method === 'POST' && /^\/api\/v1\/webhooks\//.test(path)) {
+    return { limit: 180, windowMs: 60_000 };
+  }
+  if (
+    method === 'POST' &&
+    /^\/api\/v1\/integrations\/[^/]+\/(connect|test|lookup|sync)$/.test(path)
+  ) {
+    return { limit: 30, windowMs: 60_000 };
+  }
+  return null;
+}

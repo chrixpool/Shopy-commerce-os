@@ -117,9 +117,15 @@ export class FactoryService {
       where: { id: productId, organizationId },
     });
     if (!product) throw new NotFoundException('Product not found');
-    return this.prisma.productCost.create({
-      data: productCostCreateData(organizationId, body),
-      include: { product: true, factory: true },
+    return this.prisma.$transaction(async (tx) => {
+      await tx.productCost.updateMany({
+        where: { organizationId, productId, active: true },
+        data: { active: false },
+      });
+      return tx.productCost.create({
+        data: productCostCreateData(organizationId, body),
+        include: { product: true, factory: true },
+      });
     });
   }
 
@@ -140,16 +146,23 @@ export class FactoryService {
       ...body,
       productId: firstProduct.id,
     });
-    const created = [];
-    for (const product of products) {
-      const cost = await this.prisma.productCost.create({
-        data: {
-          ...costs,
-          productId: product.id,
+    const created = await this.prisma.$transaction(async (tx) => {
+      await tx.productCost.updateMany({
+        where: {
+          organizationId,
+          productId: { in: products.map((product) => product.id) },
+          active: true,
         },
+        data: { active: false },
       });
-      created.push(cost);
-    }
+      return Promise.all(
+        products.map((product) =>
+          tx.productCost.create({
+            data: { ...costs, productId: product.id },
+          }),
+        ),
+      );
+    });
 
     const productIdSet = products.map((product) => product.id);
     const skus = products.map((product) => product.sku).filter(Boolean) as string[];
@@ -167,7 +180,7 @@ export class FactoryService {
       },
       select: { id: true },
     });
-    for (const order of affectedOrders) await this.recalculateOrder(organizationId, order.id);
+    await inBatches(affectedOrders, 8, (order) => this.recalculateOrder(organizationId, order.id));
 
     const firstCreatedCost = created[0];
     return {
@@ -418,13 +431,22 @@ export class FactoryService {
         .filter((cost) => cost.product?.sku)
         .map((cost) => [cost.product.sku as string, Number(cost.totalUnitCost)]),
     );
+    const missingItems = order.items.filter((item) => {
+      if (item.productId && costByProduct.has(item.productId)) return false;
+      return !item.sku || !costBySku.has(item.sku);
+    });
+    if (missingItems.length) {
+      throw new BadRequestException(
+        `Cost data is missing for ${missingItems.length} order item(s). Complete product costs before recalculating.`,
+      );
+    }
     const productCostTotal = order.items.reduce(
       (total, item) =>
         total +
         Number(item.quantity) *
           (item.productId
-            ? (costByProduct.get(item.productId) ?? costBySku.get(item.sku ?? '') ?? 0)
-            : (costBySku.get(item.sku ?? '') ?? 0)),
+            ? (costByProduct.get(item.productId) ?? costBySku.get(item.sku ?? '')!)
+            : costBySku.get(item.sku ?? '')!),
       0,
     );
     const revenue = Number(order.totalAmount);
@@ -468,8 +490,28 @@ export class FactoryService {
       where: { organizationId },
       select: { id: true },
     });
-    for (const order of orders) await this.recalculateOrder(organizationId, order.id);
-    return { recalculated: orders.length };
+    let recalculated = 0;
+    let incomplete = 0;
+    let failed = 0;
+    for (let index = 0; index < orders.length; index += 8) {
+      const results = await Promise.allSettled(
+        orders
+          .slice(index, index + 8)
+          .map((order) => this.recalculateOrder(organizationId, order.id)),
+      );
+      for (const result of results) {
+        if (result.status === 'fulfilled') recalculated += 1;
+        else if (result.reason instanceof BadRequestException) incomplete += 1;
+        else failed += 1;
+      }
+    }
+    return { found: orders.length, recalculated, incomplete, failed };
+  }
+}
+
+async function inBatches<T>(items: T[], size: number, worker: (item: T) => Promise<unknown>) {
+  for (let index = 0; index < items.length; index += size) {
+    await Promise.all(items.slice(index, index + size).map(worker));
   }
 }
 

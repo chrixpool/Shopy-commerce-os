@@ -16,10 +16,17 @@ import type { RawBodyRequest } from '@nestjs/common';
 import type { Request } from 'express';
 import { IntegrationProvider } from '@prisma/client';
 import { ROLE_HIERARCHY, Role } from '@shopy/shared';
-import { CurrentUser, InternalAuthGuard, Public, type SessionUser } from '../../core/auth';
+import {
+  CurrentUser,
+  InternalAuthGuard,
+  Public,
+  RequireRole,
+  type SessionUser,
+} from '../../core/auth';
 import { ConnectIntegrationDto, SyncIntegrationDto } from './dto/connect-integration.dto';
 import { CreateDraftActionDto, UpdateDraftActionStatusDto } from './dto/draft-action.dto';
 import { IntegrationsService } from './integrations.service';
+import { MesColisService } from './mes-colis.service';
 
 @UseGuards(InternalAuthGuard)
 @Controller()
@@ -156,6 +163,78 @@ export class IntegrationsController {
     @Body() dto: UpdateDraftActionStatusDto,
   ) {
     return this.integrationsService.updateDraftAction(user.organizationId, user.id, id, dto);
+  }
+}
+
+@UseGuards(InternalAuthGuard)
+@Controller('integrations/mes-colis')
+export class MesColisController {
+  constructor(private readonly mesColis: MesColisService) {}
+
+  @Get()
+  get(@CurrentUser() user: SessionUser) {
+    return this.mesColis.get(user.organizationId);
+  }
+
+  @Post('connect')
+  @RequireRole(Role.ADMIN)
+  connect(@CurrentUser() user: SessionUser, @Body() body: Record<string, unknown>) {
+    return this.mesColis.connect(user.organizationId, String(body.accessToken ?? ''));
+  }
+
+  @Post('test')
+  @RequireRole(Role.ADMIN)
+  test(@CurrentUser() user: SessionUser) {
+    return this.mesColis.test(user.organizationId);
+  }
+
+  @Post('disconnect')
+  @RequireRole(Role.ADMIN)
+  disconnect(@CurrentUser() user: SessionUser) {
+    return this.mesColis.disconnect(user.organizationId);
+  }
+
+  @Post('lookup')
+  @RequireRole(Role.ADMIN)
+  lookup(@CurrentUser() user: SessionUser, @Body() body: Record<string, unknown>) {
+    return this.mesColis.lookup(user.organizationId, body);
+  }
+
+  @Post('sync-linked')
+  @RequireRole(Role.ADMIN)
+  syncLinked(@CurrentUser() user: SessionUser) {
+    return this.mesColis.syncLinked(user.organizationId);
+  }
+
+  @Get('sync-runs')
+  runs(@CurrentUser() user: SessionUser) {
+    return this.mesColis.get(user.organizationId).then((value) => value.recentRuns);
+  }
+
+  @Get('parcels')
+  parcels(@CurrentUser() user: SessionUser) {
+    return this.mesColis.listParcels(user.organizationId);
+  }
+
+  @Get('mapping-review')
+  review(@CurrentUser() user: SessionUser) {
+    return this.mesColis.mappingReview(user.organizationId);
+  }
+
+  @Post('parcels/:id/link')
+  @RequireRole(Role.ADMIN)
+  link(
+    @CurrentUser() user: SessionUser,
+    @Param('id') id: string,
+    @Body() body: Record<string, unknown>,
+  ) {
+    return this.mesColis.link(user.organizationId, user.id, id, String(body.orderId ?? ''));
+  }
+
+  @Delete('parcels/:id/link')
+  @RequireRole(Role.ADMIN)
+  unlink(@CurrentUser() user: SessionUser, @Param('id') id: string) {
+    return this.mesColis.unlink(user.organizationId, user.id, id);
   }
 }
 

@@ -163,6 +163,20 @@ Use `/en/factory` to manage:
 
 Costing uses the workspace currency and does not perform FX conversion. Missing product costs are shown as warnings instead of silently assuming zero.
 
+## Mes Colis Read-Only Tracking
+
+Shopy uses only the documented Mes Colis read surfaces:
+
+- `POST https://api.mescolis.tn/api/orders/GetOrder`
+- Socket.IO `https://api.mescolis.tn:4001`, channel `mescolis-events`
+- Server-side authentication through encrypted `x-access-token` / `auth.token` credentials
+
+Connect Mes Colis in **Settings > Integrations**, then add an existing barcode from **Delivery**. Shopy can look up known barcodes, normalize provider statuses, match existing orders, poll linked parcels, and receive socket updates. Uncertain matches remain in Mapping Review.
+
+The integration cannot create or delete parcels, mutate delivery data, manage sub-accounts, or dispatch orders. Socket tracking is supplemented by polling because Render Free can sleep.
+
+Required configuration names are `INTEGRATION_SECRET_KEY`, `MES_COLIS_API_URL`, and `MES_COLIS_SOCKET_URL`. The access token is entered in the application and encrypted in PostgreSQL; it is never committed or returned after save.
+
 ## Windows 32-bit Local Notes
 
 - Keep local scripts non-Turbo.

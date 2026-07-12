@@ -90,8 +90,19 @@ interface ShopifyVerification {
     lastValidHmac?: boolean;
     lastFailureReason?: string | null;
     duplicateProtection: string;
+    duplicateCount?: number;
+    signatureFailures?: number;
   };
   states: string[];
+}
+
+interface WorkflowReconciliation {
+  shopifyOrdersFound: number;
+  missingConfirmationTasks: number;
+  missingFulfillmentTasks: number;
+  workflowConflicts: number;
+  completedTasks: number;
+  skippedRecords: number;
 }
 
 const FALLBACK_INTEGRATIONS: Integration[] = [
@@ -106,6 +117,7 @@ const FALLBACK_INTEGRATIONS: Integration[] = [
     mode: 'DRAFT_ACTIONS',
   },
   { provider: 'INSTAGRAM', label: 'Instagram', status: 'DISCONNECTED', mode: 'DRAFT_ACTIONS' },
+  { provider: 'MES_COLIS', label: 'Mes Colis', status: 'DISCONNECTED', mode: 'READ_ONLY' },
 ];
 
 async function optionalApiFetch<T>(path: string, fallback: T, timeoutMs = 2500) {
@@ -139,7 +151,11 @@ async function connectIntegration(formData: FormData) {
   'use server';
 
   const provider = String(formData.get('provider') ?? '');
-  await apiFetch(`/api/v1/integrations/${provider.toLowerCase().replaceAll('_', '-')}/connect`, {
+  const path =
+    provider === 'MES_COLIS'
+      ? '/api/v1/integrations/mes-colis/connect'
+      : `/api/v1/integrations/${provider.toLowerCase().replaceAll('_', '-')}/connect`;
+  await apiFetch(path, {
     method: 'POST',
     body: JSON.stringify({
       connectionName: String(formData.get('connectionName') ?? ''),
@@ -184,6 +200,14 @@ async function syncIntegration(formData: FormData) {
   const provider = String(formData.get('provider') ?? '');
   const dryRun = formData.get('dryRun') === 'true';
   try {
+    if (provider === 'MES_COLIS') {
+      if (!dryRun) {
+        await apiFetch('/api/v1/integrations/mes-colis/sync-linked', { method: 'POST' });
+      }
+      revalidatePath('/[locale]/settings', 'page');
+      revalidatePath('/[locale]/delivery', 'page');
+      return;
+    }
     await apiFetch(
       `/api/v1/integrations/${provider.toLowerCase().replaceAll('_', '-')}${dryRun ? '/dry-run' : '/sync'}`,
       {
@@ -204,7 +228,11 @@ async function testIntegration(formData: FormData) {
   'use server';
 
   const provider = String(formData.get('provider') ?? '');
-  await apiFetch(`/api/v1/integrations/${provider.toLowerCase().replaceAll('_', '-')}/test`, {
+  const path =
+    provider === 'MES_COLIS'
+      ? '/api/v1/integrations/mes-colis/test'
+      : `/api/v1/integrations/${provider.toLowerCase().replaceAll('_', '-')}/test`;
+  await apiFetch(path, {
     method: 'POST',
   });
 
@@ -215,11 +243,27 @@ async function disconnectIntegration(formData: FormData) {
   'use server';
 
   const provider = String(formData.get('provider') ?? '');
-  await apiFetch(`/api/v1/integrations/${provider.toLowerCase().replaceAll('_', '-')}/disconnect`, {
+  const path =
+    provider === 'MES_COLIS'
+      ? '/api/v1/integrations/mes-colis/disconnect'
+      : `/api/v1/integrations/${provider.toLowerCase().replaceAll('_', '-')}/disconnect`;
+  await apiFetch(path, {
     method: 'POST',
   });
 
   revalidatePath('/[locale]/settings', 'page');
+}
+
+async function repairWorkflows() {
+  'use server';
+  await apiFetch('/api/v1/workflows/reconciliation/repair', {
+    method: 'POST',
+    body: JSON.stringify({ execute: true, confirm: 'REPAIR_WORKFLOWS' }),
+  });
+  revalidatePath('/[locale]/settings', 'page');
+  revalidatePath('/[locale]/dashboard', 'page');
+  revalidatePath('/[locale]/confirmation', 'page');
+  revalidatePath('/[locale]/fulfillment', 'page');
 }
 
 export default async function SettingsPage({ params }: { params: Promise<{ locale: string }> }) {
@@ -231,6 +275,7 @@ export default async function SettingsPage({ params }: { params: Promise<{ local
     shopifyVerification,
     metaAccounts,
     syncAllRuns,
+    reconciliation,
   ] = await Promise.all([
     apiFetch<Organization>('/api/v1/settings/organization'),
     optionalApiFetch<Integration[]>('/api/v1/integrations', FALLBACK_INTEGRATIONS),
@@ -246,6 +291,7 @@ export default async function SettingsPage({ params }: { params: Promise<{ local
       3200,
     ),
     optionalApiFetch<SyncAllRun[]>('/api/v1/integrations/sync-all/runs', [], 2200),
+    optionalApiFetch<WorkflowReconciliation | null>('/api/v1/workflows/reconciliation', null, 2200),
   ]);
   const latestSyncAll = syncAllRuns[0];
   const connectedCount = integrations.filter(
@@ -428,9 +474,13 @@ export default async function SettingsPage({ params }: { params: Promise<{ local
         ) : null}
         <div className="queue-grid" style={{ marginTop: 18 }}>
           {integrations.map((integration) => {
-            const isExternal = ['SHOPIFY', 'META_ADS', 'FACEBOOK_PAGE', 'INSTAGRAM'].includes(
-              integration.provider,
-            );
+            const isExternal = [
+              'SHOPIFY',
+              'META_ADS',
+              'FACEBOOK_PAGE',
+              'INSTAGRAM',
+              'MES_COLIS',
+            ].includes(integration.provider);
             const connectionMethod = String(
               integration.config?.connectionMethod ?? 'CLIENT_CREDENTIALS',
             );
@@ -469,7 +519,9 @@ export default async function SettingsPage({ params }: { params: Promise<{ local
                         ? 'Reads page activity and creates draft post/reply ideas. Publishing is disabled.'
                         : integration.provider === 'INSTAGRAM'
                           ? 'Reads profile/media metrics and creates draft content ideas. Publishing is disabled.'
-                          : 'Available without external credentials.'}
+                          : integration.provider === 'MES_COLIS'
+                            ? 'Reads existing parcel tracking only. Shopy cannot create, delete, or modify Mes Colis parcels.'
+                            : 'Available without external credentials.'}
                 </p>
                 {isExternal ? (
                   <form action={connectIntegration} className="form-grid compact-form">
@@ -608,7 +660,7 @@ export default async function SettingsPage({ params }: { params: Promise<{ local
                     ) : null}
                     <div className="form-actions">
                       <button className="button button-secondary" type="submit">
-                        {['SHOPIFY', 'META_ADS'].includes(integration.provider)
+                        {['SHOPIFY', 'META_ADS', 'MES_COLIS'].includes(integration.provider)
                           ? 'Connect & test'
                           : 'Save connection'}
                       </button>
@@ -638,7 +690,7 @@ export default async function SettingsPage({ params }: { params: Promise<{ local
                       Sync now
                     </button>
                   </form>
-                  {integration.provider === 'SHOPIFY' ? (
+                  {['SHOPIFY', 'MES_COLIS'].includes(integration.provider) ? (
                     <form action={disconnectIntegration}>
                       <input name="provider" type="hidden" value={integration.provider} />
                       <button className="button button-secondary" type="submit">
@@ -824,7 +876,9 @@ export default async function SettingsPage({ params }: { params: Promise<{ local
                             ? `. Last failure: ${shopifyVerification.webhook.lastFailureReason}`
                             : ''}
                           . Duplicate protection:{' '}
-                          {shopifyVerification.webhook.duplicateProtection.replaceAll('_', ' ')}.
+                          {shopifyVerification.webhook.duplicateProtection.replaceAll('_', ' ')}.{' '}
+                          Duplicates ignored: {shopifyVerification.webhook.duplicateCount ?? 0}.{' '}
+                          Signature failures: {shopifyVerification.webhook.signatureFailures ?? 0}.
                         </p>
                         {shopifyVerification.mismatches.length ? (
                           <p className="field-help">
@@ -890,6 +944,49 @@ export default async function SettingsPage({ params }: { params: Promise<{ local
           })}
         </div>
       </SurfaceCard>
+      {reconciliation ? (
+        <SurfaceCard>
+          <div className="section-header">
+            <div>
+              <h2 className="section-title">Workflow reconciliation</h2>
+              <p className="section-description">
+                Preview missing internal tasks for read-only Shopify imports. Repair never writes to
+                Shopify.
+              </p>
+            </div>
+            <form action={repairWorkflows}>
+              <button
+                className="button button-primary"
+                type="submit"
+                disabled={
+                  !reconciliation.missingConfirmationTasks &&
+                  !reconciliation.missingFulfillmentTasks
+                }
+              >
+                Repair missing tasks
+              </button>
+            </form>
+          </div>
+          <div className="snapshot-grid">
+            <div>
+              <span className="metric-label">Shopify orders</span>
+              <strong>{reconciliation.shopifyOrdersFound}</strong>
+            </div>
+            <div>
+              <span className="metric-label">Missing confirmation</span>
+              <strong>{reconciliation.missingConfirmationTasks}</strong>
+            </div>
+            <div>
+              <span className="metric-label">Missing fulfillment</span>
+              <strong>{reconciliation.missingFulfillmentTasks}</strong>
+            </div>
+            <div>
+              <span className="metric-label">Conflicts</span>
+              <strong>{reconciliation.workflowConflicts}</strong>
+            </div>
+          </div>
+        </SurfaceCard>
+      ) : null}
     </div>
   );
 }

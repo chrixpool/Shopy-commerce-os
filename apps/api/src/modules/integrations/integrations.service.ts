@@ -1,4 +1,4 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Injectable, NotFoundException, OnModuleInit } from '@nestjs/common';
 import {
   DraftActionStatus,
   ConfirmationStatus,
@@ -17,6 +17,8 @@ import { MetaAdsAdapter } from './adapters/meta-ads.adapter';
 import { FacebookPageAdapter } from './adapters/facebook-page.adapter';
 import { InstagramAdapter } from './adapters/instagram.adapter';
 import { CsvAdapter, ManualAdapter } from './adapters/mock.adapter';
+import { MesColisAdapter } from './adapters/mes-colis.adapter';
+import { MesColisService } from './mes-colis.service';
 import type { IntegrationAdapter } from './adapters/integration-adapter.interface';
 import type { ConnectIntegrationDto, SyncIntegrationDto } from './dto/connect-integration.dto';
 import type { CreateDraftActionDto, UpdateDraftActionStatusDto } from './dto/draft-action.dto';
@@ -27,6 +29,7 @@ const ADAPTERS: IntegrationAdapter[] = [
   META_ADS_ADAPTER,
   new FacebookPageAdapter(),
   new InstagramAdapter(),
+  new MesColisAdapter(),
   new CsvAdapter(),
   new ManualAdapter(),
 ];
@@ -57,11 +60,41 @@ interface ShopifySyncStats {
 type ShopifyConnectionMethod = 'CLIENT_CREDENTIALS' | 'ADMIN_TOKEN';
 
 @Injectable()
-export class IntegrationsService {
+export class IntegrationsService implements OnModuleInit {
   constructor(
     private readonly prisma: PrismaService,
     private readonly secrets: IntegrationSecretsService,
+    private readonly mesColis: MesColisService,
   ) {}
+
+  async onModuleInit() {
+    const staleBefore = new Date(Date.now() - 10 * 60_000);
+    await this.prisma.$transaction([
+      this.prisma.automationRun.updateMany({
+        where: {
+          status: { in: ['QUEUED', 'RUNNING'] },
+          startedAt: { lt: staleBefore },
+          inputSnapshot: { path: ['type'], equals: 'SYNC_ALL' },
+        },
+        data: {
+          status: 'FAILED',
+          finishedAt: new Date(),
+          errorMessage: 'Sync interrupted by a service restart. Start a new run.',
+        },
+      }),
+      this.prisma.integrationSyncRun.updateMany({
+        where: { status: { in: ['QUEUED', 'RUNNING'] }, heartbeatAt: { lt: staleBefore } },
+        data: { status: 'FAILED', finishedAt: new Date(), summary: { reason: 'service_restart' } },
+      }),
+      this.prisma.integrationSyncProviderRun.updateMany({
+        where: {
+          status: { in: ['QUEUED', 'RUNNING'] },
+          parentRun: { heartbeatAt: { lt: staleBefore } },
+        },
+        data: { status: 'FAILED', finishedAt: new Date(), errorCode: 'SERVICE_RESTART' },
+      }),
+    ]);
+  }
 
   private adapter(provider: IntegrationProvider) {
     const adapter = ADAPTERS.find((item) => item.provider === provider);
@@ -164,11 +197,21 @@ export class IntegrationsService {
     const integrations = await this.prisma.integration.findMany({
       where: {
         organizationId,
-        provider: { in: [IntegrationProvider.SHOPIFY, IntegrationProvider.META_ADS] },
+        provider: {
+          in: [
+            IntegrationProvider.SHOPIFY,
+            IntegrationProvider.META_ADS,
+            IntegrationProvider.MES_COLIS,
+          ],
+        },
       },
       select: { provider: true, status: true, isActive: true },
     });
-    const providers = [IntegrationProvider.SHOPIFY, IntegrationProvider.META_ADS];
+    const providers = [
+      IntegrationProvider.SHOPIFY,
+      IntegrationProvider.META_ADS,
+      IntegrationProvider.MES_COLIS,
+    ];
     const initial = providers.map((provider) => {
       const integration = integrations.find((item) => item.provider === provider);
       return {
@@ -190,12 +233,27 @@ export class IntegrationsService {
         warnings: [],
       };
     });
+    const durableRun = await this.prisma.integrationSyncRun.create({
+      data: {
+        organizationId,
+        initiatedBy: userId,
+        status: 'RUNNING',
+        providers: {
+          create: initial.map((item) => ({
+            provider: item.provider as IntegrationProvider,
+            status: item.status === 'queued' ? 'QUEUED' : 'SKIPPED',
+            totals: {},
+            warnings: [],
+          })),
+        },
+      },
+    });
     const run = await this.prisma.automationRun.create({
       data: {
         organizationId,
         status: 'RUNNING',
         dryRun: false,
-        inputSnapshot: { type: 'SYNC_ALL', initiatedBy: userId },
+        inputSnapshot: { type: 'SYNC_ALL', initiatedBy: userId, durableRunId: durableRun.id },
         outputSnapshot: { status: 'syncing', providers: initial },
       },
     });
@@ -225,6 +283,11 @@ export class IntegrationsService {
     organizationId: string,
     initial: Array<Record<string, unknown>>,
   ) {
+    const legacyRun = await this.prisma.automationRun.findUnique({
+      where: { id: runId },
+      select: { inputSnapshot: true },
+    });
+    const durableRunId = String(asRecord(legacyRun?.inputSnapshot).durableRunId ?? '');
     const runnable = initial.filter((item) => item.status === 'queued');
     const providers = initial.map((item) =>
       item.status === 'queued' ? { ...item, status: 'syncing' } : item,
@@ -238,24 +301,49 @@ export class IntegrationsService {
     for (const item of runnable) {
       const provider = item.provider as IntegrationProvider;
       const startedAt = new Date();
+      if (durableRunId) {
+        await this.prisma.integrationSyncProviderRun.update({
+          where: { parentRunId_provider: { parentRunId: durableRunId, provider } },
+          data: { status: 'RUNNING', startedAt, attempt: { increment: 1 } },
+        });
+      }
       let providerResult: ReturnType<typeof syncProviderResult>;
       try {
-        const test = await this.test(organizationId, provider);
-        if (!('ok' in test) || !test.ok) {
-          providerResult = syncProviderResult(provider, 'failed', startedAt, null, [
-            'Connection validation failed. Reconnect this provider.',
-          ]);
-        } else {
-          const result = await this.sync(organizationId, provider, { dryRun: false });
-          const safe = safeProviderCounts(result as Record<string, unknown>);
-          const failed = 'ok' in result && result.ok === false;
+        if (provider === IntegrationProvider.MES_COLIS) {
+          const result = await this.mesColis.syncLinked(organizationId);
+          const totals =
+            'linked' in result ? result : { linked: 0, updated: 0, unchanged: 0, failed: 1 };
           providerResult = syncProviderResult(
             provider,
-            failed ? 'failed' : 'success',
+            result.status === 'FAILED' ? 'failed' : 'success',
             startedAt,
-            safe,
-            sanitizeWarnings(result as Record<string, unknown>),
+            {
+              found: totals.linked,
+              created: 0,
+              updated: totals.updated,
+              skipped: totals.unchanged,
+              failed: totals.failed,
+            },
+            totals.failed ? ['Some linked barcodes could not be refreshed.'] : [],
           );
+        } else {
+          const test = await this.test(organizationId, provider);
+          if (!('ok' in test) || !test.ok) {
+            providerResult = syncProviderResult(provider, 'failed', startedAt, null, [
+              'Connection validation failed. Reconnect this provider.',
+            ]);
+          } else {
+            const result = await this.sync(organizationId, provider, { dryRun: false });
+            const safe = safeProviderCounts(result as Record<string, unknown>);
+            const failed = 'ok' in result && result.ok === false;
+            providerResult = syncProviderResult(
+              provider,
+              failed ? 'failed' : 'success',
+              startedAt,
+              safe,
+              sanitizeWarnings(result as Record<string, unknown>),
+            );
+          }
         }
       } catch {
         providerResult = syncProviderResult(provider, 'failed', startedAt, null, [
@@ -264,6 +352,27 @@ export class IntegrationsService {
       }
       const index = providers.findIndex((candidate) => candidate.provider === provider);
       providers[index] = providerResult;
+      if (durableRunId) {
+        await this.prisma.integrationSyncProviderRun.update({
+          where: { parentRunId_provider: { parentRunId: durableRunId, provider } },
+          data: {
+            status: providerResult.status === 'success' ? 'SUCCESS' : 'FAILED',
+            finishedAt: new Date(),
+            totals: {
+              found: providerResult.found,
+              created: providerResult.created,
+              updated: providerResult.updated,
+              skipped: providerResult.skipped,
+              failed: providerResult.failed,
+            },
+            warnings: providerResult.warnings as Prisma.InputJsonValue,
+          },
+        });
+        await this.prisma.integrationSyncRun.update({
+          where: { id: durableRunId },
+          data: { heartbeatAt: new Date() },
+        });
+      }
       await this.prisma.automationRun.update({
         where: { id: runId },
         data: {
@@ -286,6 +395,17 @@ export class IntegrationsService {
         finishedAt: new Date(),
       },
     });
+    if (durableRunId) {
+      await this.prisma.integrationSyncRun.update({
+        where: { id: durableRunId },
+        data: {
+          status: status === 'partial' ? 'PARTIAL' : status === 'failed' ? 'FAILED' : 'SUCCESS',
+          finishedAt: new Date(),
+          heartbeatAt: new Date(),
+          summary: { successful, failed, skipped: providers.length - successful - failed },
+        },
+      });
+    }
   }
 
   private safeSyncAllRun(run: {
@@ -389,6 +509,8 @@ export class IntegrationsService {
         endpointPath: '/api/v1/webhooks/shopify',
         configured: Boolean(process.env.SHOPIFY_WEBHOOK_SECRET),
         count: webhookCount,
+        duplicateCount: Number(config.webhookDuplicateCount ?? 0),
+        signatureFailures: Number(config.webhookSignatureFailures ?? 0),
         lastReceivedAt: lastWebhook?.receivedAt ?? null,
         lastTopic: lastWebhook?.eventType ?? null,
         lastValidHmac: lastWebhook?.status !== 'FAILED',
@@ -1327,6 +1449,11 @@ export class IntegrationsService {
     });
 
     if (existing) {
+      await this.recordShopifyWebhookDiagnostic(organizationId, {
+        duplicate: true,
+        topic,
+        valid: verified,
+      });
       return {
         ok: true,
         verified,
@@ -1352,6 +1479,12 @@ export class IntegrationsService {
       },
     });
 
+    await this.recordShopifyWebhookDiagnostic(organizationId, {
+      duplicate: false,
+      topic,
+      valid: verified,
+    });
+
     if (!verified) {
       throw new BadRequestException(
         secret ? 'Invalid Shopify webhook signature.' : 'Shopify webhook secret is not configured.',
@@ -1365,6 +1498,33 @@ export class IntegrationsService {
       dryRun: true,
       message: 'Shopify webhook verified and recorded. Processing remains dry-run in this phase.',
     };
+  }
+
+  private async recordShopifyWebhookDiagnostic(
+    organizationId: string,
+    result: { duplicate: boolean; topic: string; valid: boolean },
+  ) {
+    const integration = await this.prisma.integration.findUnique({
+      where: { organizationId_provider: { organizationId, provider: IntegrationProvider.SHOPIFY } },
+      select: { config: true },
+    });
+    if (!integration) return;
+    const config = asRecord(integration.config);
+    await this.prisma.integration.update({
+      where: { organizationId_provider: { organizationId, provider: IntegrationProvider.SHOPIFY } },
+      data: {
+        config: {
+          ...config,
+          webhookDuplicateCount:
+            Number(config.webhookDuplicateCount ?? 0) + (result.duplicate ? 1 : 0),
+          webhookSignatureFailures:
+            Number(config.webhookSignatureFailures ?? 0) + (!result.valid ? 1 : 0),
+          ...(result.valid
+            ? { lastValidWebhookAt: new Date().toISOString(), lastWebhookTopic: result.topic }
+            : { lastWebhookFailureAt: new Date().toISOString() }),
+        } as Prisma.InputJsonValue,
+      },
+    });
   }
 
   private async findOrganizationIdForShop(shopDomain: string) {

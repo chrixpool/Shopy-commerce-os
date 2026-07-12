@@ -70,6 +70,7 @@ enum IntegrationProvider {
   META_ADS
   FACEBOOK_PAGE
   INSTAGRAM
+  MES_COLIS
   CSV
   MANUAL
 }
@@ -95,6 +96,24 @@ enum AutomationRunStatus {
   SUCCESS
   FAILED
   SKIPPED
+}
+
+enum IntegrationRunStatus {
+  QUEUED
+  RUNNING
+  SUCCESS
+  PARTIAL
+  FAILED
+  SKIPPED
+}
+
+enum ParcelMatchState {
+  EXACT_BARCODE
+  EXACT_ORDER_REFERENCE
+  HIGH_CONFIDENCE_FALLBACK
+  MANUAL
+  UNMATCHED
+  CONFLICT
 }
 
 enum ExternalEventStatus {
@@ -202,6 +221,8 @@ model Organization {
   productCosts ProductCost[]
   operatingExpenses OperatingExpense[]
   orderCostSnapshots OrderCostSnapshot[]
+  integrationSyncRuns IntegrationSyncRun[]
+  providerParcels ProviderParcel[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -331,6 +352,7 @@ model Order {
   confirmationTask   ConfirmationTask?
   fulfillmentTask    FulfillmentTask?
   parcel             Parcel?
+  providerParcels    ProviderParcel[]
   costSnapshot       OrderCostSnapshot?
 
   createdAt DateTime @default(now())
@@ -514,6 +536,80 @@ model Integration {
 
   @@unique([organizationId, provider])
   @@index([organizationId, status])
+}
+
+model IntegrationSyncRun {
+  id             String       @id @default(cuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  status         IntegrationRunStatus @default(QUEUED)
+  initiatedBy    String?
+  startedAt      DateTime @default(now())
+  heartbeatAt    DateTime @default(now())
+  finishedAt     DateTime?
+  summary        Json @default("{}")
+  providers      IntegrationSyncProviderRun[]
+
+  @@index([organizationId, startedAt(sort: Desc)])
+  @@index([organizationId, status])
+}
+
+model IntegrationSyncProviderRun {
+  id          String @id @default(cuid())
+  parentRunId String
+  parentRun   IntegrationSyncRun @relation(fields: [parentRunId], references: [id], onDelete: Cascade)
+  provider    IntegrationProvider
+  status      IntegrationRunStatus @default(QUEUED)
+  startedAt   DateTime?
+  finishedAt  DateTime?
+  attempt     Int @default(0)
+  totals      Json @default("{}")
+  warnings    Json @default("[]")
+  errorCode   String?
+
+  @@unique([parentRunId, provider])
+  @@index([provider, status])
+}
+
+model ProviderParcel {
+  id                   String       @id @default(cuid())
+  organizationId       String
+  organization         Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  provider             IntegrationProvider
+  barcode              String
+  orderId              String?
+  order                 Order? @relation(fields: [orderId], references: [id], onDelete: SetNull)
+  providerStatus        String
+  normalizedStatus      String
+  matchState            ParcelMatchState @default(UNMATCHED)
+  matchConfidence       Int @default(0)
+  matchReasons          Json @default("[]")
+  details               Json @default("{}")
+  lastProviderUpdateAt  DateTime?
+  lastSyncedAt          DateTime?
+  events                ProviderParcelEvent[]
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+
+  @@unique([organizationId, provider, barcode])
+  @@index([organizationId, matchState])
+  @@index([organizationId, normalizedStatus])
+  @@index([orderId])
+}
+
+model ProviderParcelEvent {
+  id               String @id @default(cuid())
+  providerParcelId String
+  providerParcel   ProviderParcel @relation(fields: [providerParcelId], references: [id], onDelete: Cascade)
+  providerStatus   String
+  normalizedStatus String
+  eventHash        String
+  details          Json @default("{}")
+  occurredAt       DateTime
+  receivedAt       DateTime @default(now())
+
+  @@unique([providerParcelId, eventHash])
+  @@index([providerParcelId, occurredAt])
 }
 
 // ─── AUTOMATIONS ────────────────────────────────────────────────────────────

@@ -1,5 +1,7 @@
 import { Body, Controller, Get, Param, Patch, Post, Query, UseGuards } from '@nestjs/common';
 import { CurrentUser, InternalAuthGuard, type SessionUser } from '../../core/auth';
+import { RequireRole } from '../../core/auth';
+import { Role } from '@shopy/shared';
 import { FactoryService } from './factory.service';
 
 @UseGuards(InternalAuthGuard)
@@ -65,11 +67,13 @@ export class FactoryController {
   }
 
   @Post('product-costs')
+  @RequireRole(Role.ADMIN)
   upsertProductCost(@CurrentUser() user: SessionUser, @Body() body: Record<string, unknown>) {
     return this.factoryService.upsertProductCost(user.organizationId, body);
   }
 
   @Post('product-costs/bulk-complete')
+  @RequireRole(Role.ADMIN)
   bulkCompleteProductCosts(
     @CurrentUser() user: SessionUser,
     @Body() body: Record<string, unknown>,
@@ -78,6 +82,7 @@ export class FactoryController {
   }
 
   @Patch('product-costs/:id')
+  @RequireRole(Role.ADMIN)
   updateProductCost(
     @CurrentUser() user: SessionUser,
     @Param('id') id: string,
@@ -115,11 +120,13 @@ export class FactoryController {
   }
 
   @Post('costing/recalculate-order/:orderId')
+  @RequireRole(Role.ADMIN)
   recalculateOrder(@CurrentUser() user: SessionUser, @Param('orderId') orderId: string) {
     return this.factoryService.recalculateOrder(user.organizationId, orderId);
   }
 
   @Post('costing/recalculate-all')
+  @RequireRole(Role.ADMIN)
   recalculateAll(@CurrentUser() user: SessionUser) {
     return this.factoryService.recalculateAll(user.organizationId);
   }

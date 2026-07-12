@@ -30,6 +30,34 @@ interface ParcelRecord {
   }>;
 }
 
+interface ProviderParcel {
+  id: string;
+  barcode: string;
+  orderId?: string | null;
+  providerStatus: string;
+  normalizedStatus: string;
+  matchState: string;
+  matchConfidence: number;
+  matchReasons: string[];
+  details?: Record<string, unknown>;
+  lastProviderUpdateAt?: string | null;
+  lastSyncedAt?: string | null;
+  events?: Array<{
+    id: string;
+    providerStatus: string;
+    normalizedStatus: string;
+    occurredAt: string;
+  }>;
+}
+
+async function optionalApiFetch<T>(path: string, fallback: T) {
+  try {
+    return await apiFetch<T>(path);
+  } catch {
+    return fallback;
+  }
+}
+
 async function updateDelivery(formData: FormData) {
   'use server';
 
@@ -48,11 +76,52 @@ async function updateDelivery(formData: FormData) {
   revalidatePath('/[locale]/finance', 'page');
 }
 
+async function lookupMesColis(formData: FormData) {
+  'use server';
+  await apiFetch('/api/v1/integrations/mes-colis/lookup', {
+    method: 'POST',
+    body: JSON.stringify({
+      barcode: String(formData.get('barcode') ?? ''),
+      orderReference: String(formData.get('orderReference') ?? ''),
+    }),
+  });
+  revalidatePath('/[locale]/delivery', 'page');
+  revalidatePath('/[locale]/activity', 'page');
+}
+
+async function refreshMesColis() {
+  'use server';
+  await apiFetch('/api/v1/integrations/mes-colis/sync-linked', { method: 'POST' });
+  revalidatePath('/[locale]/delivery', 'page');
+  revalidatePath('/[locale]/dashboard', 'page');
+  revalidatePath('/[locale]/activity', 'page');
+}
+
+async function linkMesColis(formData: FormData) {
+  'use server';
+  const id = String(formData.get('id') ?? '');
+  await apiFetch(`/api/v1/integrations/mes-colis/parcels/${id}/link`, {
+    method: 'POST',
+    body: JSON.stringify({ orderId: String(formData.get('orderId') ?? '') }),
+  });
+  revalidatePath('/[locale]/delivery', 'page');
+  revalidatePath('/[locale]/activity', 'page');
+}
+
+async function unlinkMesColis(formData: FormData) {
+  'use server';
+  const id = String(formData.get('id') ?? '');
+  await apiFetch(`/api/v1/integrations/mes-colis/parcels/${id}/link`, { method: 'DELETE' });
+  revalidatePath('/[locale]/delivery', 'page');
+}
+
 export default async function DeliveryPage({ params }: { params: Promise<{ locale: string }> }) {
   const { locale } = await params;
-  const [parcels, workspace] = await Promise.all([
+  const [parcels, workspace, providerParcels, mappingReview] = await Promise.all([
     apiFetch<ParcelRecord[]>('/api/v1/delivery'),
     getWorkspaceSettings(),
+    optionalApiFetch<ProviderParcel[]>('/api/v1/integrations/mes-colis/parcels', []),
+    optionalApiFetch<ProviderParcel[]>('/api/v1/integrations/mes-colis/mapping-review', []),
   ]);
   const inTransit = parcels.filter((parcel) =>
     ['PICKED_UP', 'IN_TRANSIT', 'OUT_FOR_DELIVERY'].includes(parcel.status),
@@ -98,6 +167,160 @@ export default async function DeliveryPage({ params }: { params: Promise<{ local
           badgeTone="muted"
         />
       </section>
+
+      <section className="card card-padded">
+        <div className="section-header">
+          <div>
+            <h2 className="section-title">Mes Colis tracking</h2>
+            <p className="section-description">
+              Link and refresh existing barcodes in read-only mode. Shopy never creates or changes
+              Mes Colis parcels.
+            </p>
+          </div>
+          <form action={refreshMesColis}>
+            <button className="button button-secondary" type="submit">
+              Refresh all
+            </button>
+          </form>
+        </div>
+        <form action={lookupMesColis} className="inline-form" style={{ marginTop: 14 }}>
+          <input className="field" name="barcode" placeholder="Mes Colis barcode" required />
+          <input
+            className="field"
+            name="orderReference"
+            placeholder="Optional exact order reference"
+          />
+          <button className="button button-primary" type="submit">
+            Link barcode
+          </button>
+        </form>
+        <div className="snapshot-grid" style={{ marginTop: 14 }}>
+          <div>
+            <span className="metric-label">Tracked barcodes</span>
+            <strong>{providerParcels.length}</strong>
+          </div>
+          <div>
+            <span className="metric-label">Mapping review</span>
+            <strong>{mappingReview.length}</strong>
+          </div>
+          <div>
+            <span className="metric-label">Exceptions</span>
+            <strong>
+              {
+                providerParcels.filter((item) =>
+                  ['EXCEPTION', 'NEEDS_REVIEW'].includes(item.normalizedStatus),
+                ).length
+              }
+            </strong>
+          </div>
+        </div>
+      </section>
+
+      {mappingReview.length ? (
+        <div className="table-wrap">
+          <table className="data-table">
+            <thead>
+              <tr>
+                <th>Barcode</th>
+                <th>Provider status</th>
+                <th>Match</th>
+                <th>Confidence</th>
+                <th>Review</th>
+              </tr>
+            </thead>
+            <tbody>
+              {mappingReview.map((item) => (
+                <tr key={item.id}>
+                  <td>{item.barcode}</td>
+                  <td>{item.providerStatus}</td>
+                  <td>
+                    <span className="badge badge-muted">
+                      {item.matchState.replaceAll('_', ' ')}
+                    </span>
+                  </td>
+                  <td>{item.matchConfidence}%</td>
+                  <td>
+                    <form action={linkMesColis} className="inline-form">
+                      <input name="id" type="hidden" value={item.id} />
+                      <input
+                        className="field"
+                        name="orderId"
+                        placeholder="Exact Shopy order ID"
+                        required
+                      />
+                      <button className="button button-secondary" type="submit">
+                        Link
+                      </button>
+                    </form>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      ) : null}
+
+      {providerParcels.length ? (
+        <div className="table-wrap">
+          <table className="data-table">
+            <thead>
+              <tr>
+                <th>Provider / barcode</th>
+                <th>Provider status</th>
+                <th>Normalized</th>
+                <th>Match</th>
+                <th>Last update</th>
+                <th>Action</th>
+              </tr>
+            </thead>
+            <tbody>
+              {providerParcels.map((item) => (
+                <tr key={item.id}>
+                  <td>
+                    <strong>Mes Colis</strong>
+                    <div>{item.barcode}</div>
+                  </td>
+                  <td>{item.providerStatus}</td>
+                  <td>
+                    <span className="badge badge-muted">
+                      {item.normalizedStatus.replaceAll('_', ' ')}
+                    </span>
+                  </td>
+                  <td>{item.matchState.replaceAll('_', ' ')}</td>
+                  <td>
+                    {item.lastProviderUpdateAt
+                      ? new Intl.DateTimeFormat(locale, {
+                          dateStyle: 'medium',
+                          timeStyle: 'short',
+                        }).format(new Date(item.lastProviderUpdateAt))
+                      : 'Unknown'}
+                  </td>
+                  <td>
+                    {item.orderId ? (
+                      <div className="button-row">
+                        <Link
+                          className="button button-secondary"
+                          href={`/${locale}/orders/${item.orderId}`}
+                        >
+                          Order
+                        </Link>
+                        <form action={unlinkMesColis}>
+                          <input name="id" type="hidden" value={item.id} />
+                          <button className="button button-secondary" type="submit">
+                            Unlink
+                          </button>
+                        </form>
+                      </div>
+                    ) : (
+                      <span className="muted">Review mapping</span>
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      ) : null}
 
       {parcels.length === 0 ? (
         <EmptyState

@@ -21,6 +21,7 @@
     "shopify:dry-run": "node scripts/shopify/dry-run-shopify-sync.mjs",
     "shopify:webhook:test": "node scripts/shopify/verify-shopify-webhook-sample.mjs",
     "meta:test": "pnpm --filter @shopy/api build && node scripts/meta-ads-smoke.mjs",
+    "business:test": "pnpm --filter @shopy/api build && node scripts/business-readiness-tests.mjs",
     "format": "prettier --write \"**/*.{ts,tsx,js,jsx,json,css,md}\"",
     "format:check": "prettier --check \"**/*.{ts,tsx,js,jsx,json,css,md}\"",
     "prepare": "husky"
