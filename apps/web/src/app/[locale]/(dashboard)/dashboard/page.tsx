@@ -1,5 +1,6 @@
 import { getTranslations } from 'next-intl/server';
 import Link from 'next/link';
+import { revalidatePath } from 'next/cache';
 import {
   EmptyState,
   MetricCard,
@@ -9,7 +10,7 @@ import {
   SurfaceCard,
 } from '@/components/ui/page';
 import { WorkspaceRecovery } from '@/components/ui/workspace-recovery';
-import { apiFetchState } from '@/lib/api';
+import { apiFetch, apiFetchState } from '@/lib/api';
 import { formatMoney } from '@/lib/currency';
 
 interface DashboardSummary {
@@ -75,6 +76,25 @@ interface SyncRun {
   errorMessage?: string | null;
 }
 
+interface SyncAllRun {
+  id: string;
+  status: string;
+  summary?: string | null;
+  startedAt: string;
+  providers: Array<{
+    provider: string;
+    status: string;
+    warnings: string[];
+  }>;
+}
+
+async function syncAllIntegrations() {
+  'use server';
+  await apiFetch('/api/v1/integrations/sync-all', { method: 'POST' });
+  revalidatePath('/[locale]/dashboard', 'page');
+  revalidatePath('/[locale]/settings', 'page');
+}
+
 const EMPTY_SUMMARY: DashboardSummary = {
   totalOrders: 0,
   revenue: 0,
@@ -113,6 +133,7 @@ export default async function DashboardPage({
     draftActionsResult,
     costingResult,
     shopifyRunsResult,
+    syncAllRunsResult,
   ] = await Promise.all([
     apiFetchState<DashboardSummary>(
       `/api/v1/dashboard/summary?${dashboardQuery.toString()}`,
@@ -129,6 +150,7 @@ export default async function DashboardPage({
       productsMissingCost: 0,
     }),
     apiFetchState<SyncRun[]>('/api/v1/integrations/shopify/sync-runs', [], { timeoutMs: 3000 }),
+    apiFetchState<SyncAllRun[]>('/api/v1/integrations/sync-all/runs', [], { timeoutMs: 2200 }),
   ]);
   if ([summaryResult.state, workspaceResult.state].includes('unauthorized')) {
     throw new Error('Your session is no longer valid. Sign in again.');
@@ -139,6 +161,7 @@ export default async function DashboardPage({
   const draftActions = draftActionsResult.data;
   const costing = costingResult.data;
   const shopifyRuns = shopifyRunsResult.data;
+  const latestSyncAll = syncAllRunsResult.data[0];
   const criticalUnavailable = summaryResult.state !== 'ready';
   const integrationsUnavailable = integrationsResult.state !== 'ready';
   const connectedChannels = integrations.filter(
@@ -612,6 +635,60 @@ export default async function DashboardPage({
               </strong>
             </div>
           </div>
+        </SurfaceCard>
+
+        <SurfaceCard>
+          <SectionHeader
+            title="Integration health"
+            description="Independent read-only sync status across connected commerce channels."
+            actions={
+              <form action={syncAllIntegrations}>
+                <button className="button button-primary" type="submit">
+                  Sync all
+                </button>
+              </form>
+            }
+          />
+          <div className="snapshot-grid" style={{ marginTop: 16 }}>
+            {[shopify, meta].map((integration) => (
+              <div key={integration?.provider ?? 'provider'}>
+                <span className="metric-label">
+                  {integration?.provider?.replaceAll('_', ' ') ?? 'Provider'}
+                </span>
+                <strong>{integration?.status ?? 'DISCONNECTED'}</strong>
+                <small>
+                  {integration?.lastSyncAt
+                    ? `Last sync ${new Date(integration.lastSyncAt).toLocaleString(locale)}`
+                    : 'Not synced yet'}
+                </small>
+              </div>
+            ))}
+          </div>
+          {latestSyncAll ? (
+            <div className="status-banner" style={{ marginTop: 14 }}>
+              <div>
+                <strong>{latestSyncAll.summary ?? `Sync ${latestSyncAll.status}`}</strong>
+                <p>
+                  {latestSyncAll.providers
+                    .map(
+                      (provider) => `${provider.provider.replaceAll('_', ' ')}: ${provider.status}`,
+                    )
+                    .join(' · ')}
+                </p>
+              </div>
+              <StatusBadge
+                tone={
+                  latestSyncAll.status === 'success'
+                    ? 'success'
+                    : latestSyncAll.status === 'partial'
+                      ? 'warning'
+                      : 'info'
+                }
+              >
+                {latestSyncAll.status}
+              </StatusBadge>
+            </div>
+          ) : null}
         </SurfaceCard>
 
         <SurfaceCard>

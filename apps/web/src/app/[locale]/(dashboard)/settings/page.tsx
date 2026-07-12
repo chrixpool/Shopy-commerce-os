@@ -20,6 +20,8 @@ interface Integration {
   capabilities?: Record<string, boolean>;
   config?: Record<string, unknown>;
   lastSyncAt?: string | null;
+  lastSuccessfulSyncAt?: string | null;
+  lastFailedSyncAt?: string | null;
   errorMessage?: string | null;
 }
 
@@ -45,6 +47,24 @@ interface MetaAccountsResult {
     accountStatus?: number;
     currency?: string;
     timezone?: string;
+  }>;
+}
+
+interface SyncAllRun {
+  id: string;
+  status: string;
+  startedAt: string;
+  finishedAt?: string | null;
+  summary?: string | null;
+  providers: Array<{
+    provider: string;
+    status: string;
+    found: number;
+    created: number;
+    updated: number;
+    skipped: number;
+    failed: number;
+    warnings: string[];
   }>;
 }
 
@@ -150,6 +170,14 @@ async function selectMetaAccount(formData: FormData) {
   revalidatePath('/[locale]/campaigns', 'page');
 }
 
+async function syncAllIntegrations() {
+  'use server';
+  await apiFetch('/api/v1/integrations/sync-all', { method: 'POST' });
+  revalidatePath('/[locale]/settings', 'page');
+  revalidatePath('/[locale]/dashboard', 'page');
+  revalidatePath('/[locale]/campaigns', 'page');
+}
+
 async function syncIntegration(formData: FormData) {
   'use server';
 
@@ -196,22 +224,30 @@ async function disconnectIntegration(formData: FormData) {
 
 export default async function SettingsPage({ params }: { params: Promise<{ locale: string }> }) {
   const { locale } = await params;
-  const [organization, integrations, shopifySyncRuns, shopifyVerification, metaAccounts] =
-    await Promise.all([
-      apiFetch<Organization>('/api/v1/settings/organization'),
-      optionalApiFetch<Integration[]>('/api/v1/integrations', FALLBACK_INTEGRATIONS),
-      optionalApiFetch<SyncRun[]>('/api/v1/integrations/shopify/sync-runs', [], 1200),
-      optionalApiFetch<ShopifyVerification | null>(
-        '/api/v1/integrations/shopify/verification',
-        null,
-        1200,
-      ),
-      optionalApiFetch<MetaAccountsResult | null>(
-        '/api/v1/integrations/meta-ads/accounts',
-        null,
-        3200,
-      ),
-    ]);
+  const [
+    organization,
+    integrations,
+    shopifySyncRuns,
+    shopifyVerification,
+    metaAccounts,
+    syncAllRuns,
+  ] = await Promise.all([
+    apiFetch<Organization>('/api/v1/settings/organization'),
+    optionalApiFetch<Integration[]>('/api/v1/integrations', FALLBACK_INTEGRATIONS),
+    optionalApiFetch<SyncRun[]>('/api/v1/integrations/shopify/sync-runs', [], 1200),
+    optionalApiFetch<ShopifyVerification | null>(
+      '/api/v1/integrations/shopify/verification',
+      null,
+      1200,
+    ),
+    optionalApiFetch<MetaAccountsResult | null>(
+      '/api/v1/integrations/meta-ads/accounts',
+      null,
+      3200,
+    ),
+    optionalApiFetch<SyncAllRun[]>('/api/v1/integrations/sync-all/runs', [], 2200),
+  ]);
+  const latestSyncAll = syncAllRuns[0];
   const connectedCount = integrations.filter(
     (integration) => integration.status === 'CONNECTED',
   ).length;
@@ -347,7 +383,49 @@ export default async function SettingsPage({ params }: { params: Promise<{ local
               rest when saved and never shown again.
             </p>
           </div>
+          <form action={syncAllIntegrations}>
+            <button className="button button-primary" type="submit">
+              Sync all
+            </button>
+          </form>
         </div>
+        {latestSyncAll ? (
+          <div className="sync-center" style={{ marginTop: 16 }}>
+            <div className="queue-card-header">
+              <div>
+                <p className="queue-title">Latest integration run</p>
+                <p className="queue-meta">
+                  {latestSyncAll.summary ?? `Run ${latestSyncAll.status}`}
+                </p>
+              </div>
+              <StatusBadge
+                tone={
+                  latestSyncAll.status === 'success'
+                    ? 'success'
+                    : latestSyncAll.status === 'partial'
+                      ? 'warning'
+                      : latestSyncAll.status === 'failed'
+                        ? 'danger'
+                        : 'info'
+                }
+              >
+                {latestSyncAll.status}
+              </StatusBadge>
+            </div>
+            <div className="snapshot-grid" style={{ marginTop: 12 }}>
+              {latestSyncAll.providers.map((provider) => (
+                <div key={provider.provider}>
+                  <span className="metric-label">{provider.provider.replaceAll('_', ' ')}</span>
+                  <strong>{provider.status}</strong>
+                  <small>
+                    {provider.created} created · {provider.updated} updated · {provider.skipped}{' '}
+                    skipped
+                  </small>
+                </div>
+              ))}
+            </div>
+          </div>
+        ) : null}
         <div className="queue-grid" style={{ marginTop: 18 }}>
           {integrations.map((integration) => {
             const isExternal = ['SHOPIFY', 'META_ADS', 'FACEBOOK_PAGE', 'INSTAGRAM'].includes(
@@ -448,7 +526,11 @@ export default async function SettingsPage({ params }: { params: Promise<{ local
                           <input
                             className="field"
                             name="clientSecret"
-                            placeholder="Paste to connect or rotate"
+                            placeholder={
+                              integration.status === 'CONNECTED'
+                                ? 'Credential saved securely'
+                                : 'Paste to connect'
+                            }
                             type="password"
                             autoComplete="off"
                           />
@@ -459,7 +541,11 @@ export default async function SettingsPage({ params }: { params: Promise<{ local
                             <input
                               className="field"
                               name="adminAccessToken"
-                              placeholder="Paste Admin API access token"
+                              placeholder={
+                                integration.status === 'CONNECTED'
+                                  ? 'Credential saved securely'
+                                  : 'Paste Admin API access token'
+                              }
                               type="password"
                               autoComplete="off"
                             />
@@ -511,7 +597,11 @@ export default async function SettingsPage({ params }: { params: Promise<{ local
                         <input
                           className="field"
                           name="accessToken"
-                          placeholder="Paste token to replace saved credential"
+                          placeholder={
+                            integration.status === 'CONNECTED'
+                              ? 'Credential saved securely'
+                              : 'Paste access token'
+                          }
                           type="password"
                         />
                       </label>
@@ -658,14 +748,23 @@ export default async function SettingsPage({ params }: { params: Promise<{ local
                   </div>
                 ) : null}
                 <p className="field-help">
-                  Last sync:{' '}
-                  {integration.lastSyncAt
+                  Last successful sync:{' '}
+                  {integration.lastSuccessfulSyncAt
                     ? new Intl.DateTimeFormat(locale, {
                         dateStyle: 'medium',
                         timeStyle: 'short',
-                      }).format(new Date(integration.lastSyncAt))
+                      }).format(new Date(integration.lastSuccessfulSyncAt))
                     : 'Not synced yet'}
                 </p>
+                {integration.lastFailedSyncAt ? (
+                  <p className="field-help">
+                    Last failed sync:{' '}
+                    {new Intl.DateTimeFormat(locale, {
+                      dateStyle: 'medium',
+                      timeStyle: 'short',
+                    }).format(new Date(integration.lastFailedSyncAt))}
+                  </p>
+                ) : null}
                 {integration.provider === 'SHOPIFY' ? (
                   <div className="sync-history" aria-label="Shopify sync history">
                     {shopifyVerification ? (

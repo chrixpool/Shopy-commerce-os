@@ -74,21 +74,51 @@ export class IntegrationsService {
       where: { organizationId_provider: { organizationId, provider } },
     });
     if (!integration) return null;
+    let credentials: Record<string, unknown> = {};
+    try {
+      credentials = decryptCredentials(asRecord(integration.encryptedCredentials), this.secrets);
+    } catch {
+      await this.prisma.integration.update({
+        where: { id: integration.id },
+        data: {
+          status: IntegrationStatus.ERROR,
+          isActive: false,
+          errorMessage: 'Saved credentials cannot be decrypted. Reconnect this integration.',
+        },
+      });
+    }
     return {
       integration,
       connection: {
         organizationId,
         config: asRecord(integration.config),
-        credentials: decryptCredentials(asRecord(integration.encryptedCredentials), this.secrets),
+        credentials,
       },
     };
   }
 
   async list(organizationId: string) {
-    const integrations = await this.prisma.integration.findMany({ where: { organizationId } });
+    const [integrations, recentRuns] = await Promise.all([
+      this.prisma.integration.findMany({ where: { organizationId } }),
+      this.prisma.automationRun.findMany({
+        where: { organizationId },
+        orderBy: { startedAt: 'desc' },
+        take: 100,
+        select: {
+          status: true,
+          dryRun: true,
+          startedAt: true,
+          finishedAt: true,
+          inputSnapshot: true,
+        },
+      }),
+    ]);
     return Object.values(IntegrationProvider).map((provider) => {
       const adapter = this.adapter(provider);
       const row = integrations.find((integration) => integration.provider === provider);
+      const providerRuns = recentRuns.filter(
+        (run) => asRecord(run.inputSnapshot).provider === provider && !run.dryRun,
+      );
       return {
         provider,
         label: PROVIDER_LABELS[provider],
@@ -98,6 +128,9 @@ export class IntegrationsService {
           row?.isActive ??
           (provider === IntegrationProvider.CSV || provider === IntegrationProvider.MANUAL),
         lastSyncAt: row?.lastSyncAt ?? null,
+        lastSuccessfulSyncAt:
+          providerRuns.find((run) => run.status === 'SUCCESS')?.finishedAt ?? null,
+        lastFailedSyncAt: providerRuns.find((run) => run.status === 'FAILED')?.finishedAt ?? null,
         errorMessage: row?.errorMessage ?? null,
         capabilities: adapter.capabilities(),
         config:
@@ -105,13 +138,173 @@ export class IntegrationsService {
             ? sanitizeShopifyConfig(row?.config)
             : provider === IntegrationProvider.META_ADS
               ? sanitizeMetaConfig(row?.config)
-              : sanitizeConfig(row?.config),
+              : provider === IntegrationProvider.FACEBOOK_PAGE ||
+                  provider === IntegrationProvider.INSTAGRAM
+                ? sanitizeSocialConfig(row?.config)
+                : sanitizeConfig(row?.config),
       };
     });
   }
 
   async get(organizationId: string, provider: IntegrationProvider) {
     return (await this.list(organizationId)).find((item) => item.provider === provider);
+  }
+
+  async startSyncAll(organizationId: string, userId: string) {
+    const active = await this.prisma.automationRun.findFirst({
+      where: {
+        organizationId,
+        status: { in: ['QUEUED', 'RUNNING'] },
+        inputSnapshot: { path: ['type'], equals: 'SYNC_ALL' },
+      },
+      orderBy: { startedAt: 'desc' },
+    });
+    if (active) return this.safeSyncAllRun(active);
+
+    const integrations = await this.prisma.integration.findMany({
+      where: {
+        organizationId,
+        provider: { in: [IntegrationProvider.SHOPIFY, IntegrationProvider.META_ADS] },
+      },
+      select: { provider: true, status: true, isActive: true },
+    });
+    const providers = [IntegrationProvider.SHOPIFY, IntegrationProvider.META_ADS];
+    const initial = providers.map((provider) => {
+      const integration = integrations.find((item) => item.provider === provider);
+      return {
+        provider,
+        status:
+          integration?.isActive && integration.status === IntegrationStatus.CONNECTED
+            ? 'queued'
+            : integration?.status === IntegrationStatus.DISABLED
+              ? 'skipped'
+              : 'disconnected',
+        startedAt: null,
+        finishedAt: null,
+        duration: null,
+        found: 0,
+        created: 0,
+        updated: 0,
+        skipped: 0,
+        failed: 0,
+        warnings: [],
+      };
+    });
+    const run = await this.prisma.automationRun.create({
+      data: {
+        organizationId,
+        status: 'RUNNING',
+        dryRun: false,
+        inputSnapshot: { type: 'SYNC_ALL', initiatedBy: userId },
+        outputSnapshot: { status: 'syncing', providers: initial },
+      },
+    });
+    setImmediate(() => void this.executeSyncAll(run.id, organizationId, initial));
+    return this.safeSyncAllRun(run);
+  }
+
+  async syncAllRun(organizationId: string, runId: string) {
+    const run = await this.prisma.automationRun.findFirst({
+      where: { id: runId, organizationId, inputSnapshot: { path: ['type'], equals: 'SYNC_ALL' } },
+    });
+    if (!run) throw new NotFoundException('Sync run not found');
+    return this.safeSyncAllRun(run);
+  }
+
+  async syncAllRuns(organizationId: string) {
+    const runs = await this.prisma.automationRun.findMany({
+      where: { organizationId, inputSnapshot: { path: ['type'], equals: 'SYNC_ALL' } },
+      orderBy: { startedAt: 'desc' },
+      take: 20,
+    });
+    return runs.map((run) => this.safeSyncAllRun(run));
+  }
+
+  private async executeSyncAll(
+    runId: string,
+    organizationId: string,
+    initial: Array<Record<string, unknown>>,
+  ) {
+    const runnable = initial.filter((item) => item.status === 'queued');
+    const providers = initial.map((item) =>
+      item.status === 'queued' ? { ...item, status: 'syncing' } : item,
+    );
+    await this.prisma.automationRun.update({
+      where: { id: runId },
+      data: {
+        outputSnapshot: { status: 'syncing', providers } as unknown as Prisma.InputJsonValue,
+      },
+    });
+    for (const item of runnable) {
+      const provider = item.provider as IntegrationProvider;
+      const startedAt = new Date();
+      let providerResult: ReturnType<typeof syncProviderResult>;
+      try {
+        const test = await this.test(organizationId, provider);
+        if (!('ok' in test) || !test.ok) {
+          providerResult = syncProviderResult(provider, 'failed', startedAt, null, [
+            'Connection validation failed. Reconnect this provider.',
+          ]);
+        } else {
+          const result = await this.sync(organizationId, provider, { dryRun: false });
+          const safe = safeProviderCounts(result as Record<string, unknown>);
+          const failed = 'ok' in result && result.ok === false;
+          providerResult = syncProviderResult(
+            provider,
+            failed ? 'failed' : 'success',
+            startedAt,
+            safe,
+            sanitizeWarnings(result as Record<string, unknown>),
+          );
+        }
+      } catch {
+        providerResult = syncProviderResult(provider, 'failed', startedAt, null, [
+          'Provider sync failed. Test or reconnect this integration.',
+        ]);
+      }
+      const index = providers.findIndex((candidate) => candidate.provider === provider);
+      providers[index] = providerResult;
+      await this.prisma.automationRun.update({
+        where: { id: runId },
+        data: {
+          outputSnapshot: { status: 'syncing', providers } as unknown as Prisma.InputJsonValue,
+        },
+      });
+    }
+    const successful = providers.filter((item) => item.status === 'success').length;
+    const failed = providers.filter((item) => item.status === 'failed').length;
+    const status = failed && successful ? 'partial' : failed ? 'failed' : 'success';
+    await this.prisma.automationRun.update({
+      where: { id: runId },
+      data: {
+        status: status === 'failed' ? 'FAILED' : 'SUCCESS',
+        outputSnapshot: {
+          status,
+          providers,
+          summary: `${successful} integration(s) synced, ${failed} failed, ${providers.length - successful - failed} skipped.`,
+        } as unknown as Prisma.InputJsonValue,
+        finishedAt: new Date(),
+      },
+    });
+  }
+
+  private safeSyncAllRun(run: {
+    id: string;
+    status: string;
+    startedAt: Date;
+    finishedAt: Date | null;
+    outputSnapshot: unknown;
+  }) {
+    const output = asRecord(run.outputSnapshot);
+    return {
+      id: run.id,
+      status: output.status ?? run.status.toLowerCase(),
+      startedAt: run.startedAt,
+      finishedAt: run.finishedAt,
+      duration: run.finishedAt ? run.finishedAt.getTime() - run.startedAt.getTime() : null,
+      summary: typeof output.summary === 'string' ? output.summary : null,
+      providers: Array.isArray(output.providers) ? output.providers : [],
+    };
   }
 
   async verifyShopify(organizationId: string) {
@@ -238,6 +431,12 @@ export class IntegrationsService {
             config,
             credentials: decryptedCredentials,
           });
+    if (
+      provider === IntegrationProvider.FACEBOOK_PAGE ||
+      provider === IntegrationProvider.INSTAGRAM
+    ) {
+      config.lastTestAt = new Date().toISOString();
+    }
     if (provider === IntegrationProvider.SHOPIFY) {
       config.lastTestAt = new Date().toISOString();
       if ('shop' in test && test.shop) {
@@ -308,7 +507,10 @@ export class IntegrationsService {
           ? sanitizeShopifyConfig(saved.config)
           : provider === IntegrationProvider.META_ADS
             ? sanitizeMetaConfig(saved.config)
-            : sanitizeConfig(saved.config),
+            : provider === IntegrationProvider.FACEBOOK_PAGE ||
+                provider === IntegrationProvider.INSTAGRAM
+              ? sanitizeSocialConfig(saved.config)
+              : sanitizeConfig(saved.config),
     };
   }
 
@@ -483,7 +685,12 @@ export class IntegrationsService {
   }
 
   async disconnect(organizationId: string, provider: IntegrationProvider) {
-    if (provider !== IntegrationProvider.SHOPIFY && provider !== IntegrationProvider.META_ADS) {
+    if (
+      provider !== IntegrationProvider.SHOPIFY &&
+      provider !== IntegrationProvider.META_ADS &&
+      provider !== IntegrationProvider.FACEBOOK_PAGE &&
+      provider !== IntegrationProvider.INSTAGRAM
+    ) {
       throw new BadRequestException('This provider cannot be disconnected from this endpoint.');
     }
     return this.prisma.integration.upsert({
@@ -1322,6 +1529,17 @@ function sanitizeMetaConfig(value: unknown): Record<string, unknown> {
   };
 }
 
+function sanitizeSocialConfig(value: unknown): Record<string, unknown> {
+  const config = sanitizeConfig(value);
+  const externalReference = String(config.pageId ?? config.instagramBusinessAccountId ?? '');
+  return {
+    metadata: config.metadata ?? {},
+    maskedReference: externalReference ? `****${externalReference.slice(-4)}` : null,
+    lastTestAt: config.lastTestAt ?? null,
+    tokenExpiresAt: config.tokenExpiresAt ?? null,
+  };
+}
+
 function maskAccountId(value: string) {
   const suffix = value.replace(/^act_/, '').slice(-4);
   return suffix ? `act_••••${suffix}` : 'Unavailable';
@@ -1343,6 +1561,52 @@ function metaMetricData(row: Record<string, unknown>) {
     ctr: row.ctr == null ? null : Number(row.ctr),
     cpm: row.cpm == null ? null : Number(row.cpm),
     roas: reportedValue > 0 && spend > 0 ? reportedValue / spend : null,
+  };
+}
+
+function safeProviderCounts(result: Record<string, unknown>) {
+  const source = asRecord(result.counts);
+  const totals = { found: 0, created: 0, updated: 0, skipped: 0, failed: 0 };
+  const add = (value: unknown) => {
+    const row = asRecord(value);
+    for (const key of Object.keys(totals) as Array<keyof typeof totals>) {
+      const number = Number(row[key] ?? 0);
+      if (Number.isFinite(number)) totals[key] += number;
+    }
+  };
+  add(source);
+  for (const value of Object.values(source)) add(value);
+  return totals;
+}
+
+function sanitizeWarnings(result: Record<string, unknown>) {
+  return Array.isArray(result.warnings)
+    ? result.warnings
+        .slice(0, 10)
+        .map(() => 'Provider reported a sync warning. Review connection settings.')
+    : [];
+}
+
+function syncProviderResult(
+  provider: IntegrationProvider,
+  status: 'success' | 'failed',
+  startedAt: Date,
+  counts: ReturnType<typeof safeProviderCounts> | null,
+  warnings: string[],
+) {
+  const finishedAt = new Date();
+  return {
+    provider,
+    status,
+    startedAt: startedAt.toISOString(),
+    finishedAt: finishedAt.toISOString(),
+    duration: finishedAt.getTime() - startedAt.getTime(),
+    found: counts?.found ?? 0,
+    created: counts?.created ?? 0,
+    updated: counts?.updated ?? 0,
+    skipped: counts?.skipped ?? 0,
+    failed: status === 'failed' ? Math.max(1, counts?.failed ?? 0) : (counts?.failed ?? 0),
+    warnings,
   };
 }
 

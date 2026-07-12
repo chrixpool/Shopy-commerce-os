@@ -2342,6 +2342,23 @@ body {
   background: var(--brand);
 }
 
+.sync-center,
+.integration-diagnostics {
+  padding: 14px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: var(--surface-soft);
+}
+
+.sync-center small,
+.integration-diagnostics small {
+  display: block;
+  margin-top: 4px;
+  color: var(--text-3);
+  font-size: 10px;
+  line-height: 1.4;
+}
+
 @media (max-width: 1240px) {
   .stats-grid {
     grid-template-columns: repeat(3, minmax(0, 1fr));

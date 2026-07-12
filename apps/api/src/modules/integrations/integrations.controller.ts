@@ -10,10 +10,12 @@ import {
   Post,
   Req,
   UseGuards,
+  ForbiddenException,
 } from '@nestjs/common';
 import type { RawBodyRequest } from '@nestjs/common';
 import type { Request } from 'express';
 import { IntegrationProvider } from '@prisma/client';
+import { ROLE_HIERARCHY, Role } from '@shopy/shared';
 import { CurrentUser, InternalAuthGuard, Public, type SessionUser } from '../../core/auth';
 import { ConnectIntegrationDto, SyncIntegrationDto } from './dto/connect-integration.dto';
 import { CreateDraftActionDto, UpdateDraftActionStatusDto } from './dto/draft-action.dto';
@@ -27,6 +29,22 @@ export class IntegrationsController {
   @Get('integrations')
   list(@CurrentUser() user: SessionUser) {
     return this.integrationsService.list(user.organizationId);
+  }
+
+  @Post('integrations/sync-all')
+  syncAll(@CurrentUser() user: SessionUser) {
+    assertIntegrationManager(user);
+    return this.integrationsService.startSyncAll(user.organizationId, user.id);
+  }
+
+  @Get('integrations/sync-all/runs')
+  syncAllRuns(@CurrentUser() user: SessionUser) {
+    return this.integrationsService.syncAllRuns(user.organizationId);
+  }
+
+  @Get('integrations/sync-all/:runId')
+  syncAllRun(@CurrentUser() user: SessionUser, @Param('runId') runId: string) {
+    return this.integrationsService.syncAllRun(user.organizationId, runId);
   }
 
   @Get('integrations/shopify/verification')
@@ -45,11 +63,13 @@ export class IntegrationsController {
     @Param('provider') provider: string,
     @Body() dto: ConnectIntegrationDto,
   ) {
+    assertIntegrationManager(user);
     return this.integrationsService.connect(user.organizationId, parseProvider(provider), dto);
   }
 
   @Post('integrations/:provider/test')
   test(@CurrentUser() user: SessionUser, @Param('provider') provider: string) {
+    assertIntegrationManager(user);
     return this.integrationsService.test(user.organizationId, parseProvider(provider));
   }
 
@@ -60,6 +80,7 @@ export class IntegrationsController {
 
   @Post('integrations/meta-ads/select-account')
   selectMetaAccount(@CurrentUser() user: SessionUser, @Body() dto: ConnectIntegrationDto) {
+    assertIntegrationManager(user);
     if (!dto.accountId) throw new BadRequestException('Select an accessible ad account.');
     return this.integrationsService.selectMetaAccount(user.organizationId, dto.accountId);
   }
@@ -70,11 +91,13 @@ export class IntegrationsController {
     @Param('provider') provider: string,
     @Body() dto: SyncIntegrationDto,
   ) {
+    assertIntegrationManager(user);
     return this.integrationsService.sync(user.organizationId, parseProvider(provider), dto);
   }
 
   @Post('integrations/:provider/dry-run')
   dryRun(@CurrentUser() user: SessionUser, @Param('provider') provider: string) {
+    assertIntegrationManager(user);
     return this.integrationsService.sync(user.organizationId, parseProvider(provider), {
       dryRun: true,
     });
@@ -87,11 +110,13 @@ export class IntegrationsController {
 
   @Post('integrations/:provider/disconnect')
   disconnect(@CurrentUser() user: SessionUser, @Param('provider') provider: string) {
+    assertIntegrationManager(user);
     return this.integrationsService.disconnect(user.organizationId, parseProvider(provider));
   }
 
   @Delete('integrations/:provider/disconnect')
   disconnectDelete(@CurrentUser() user: SessionUser, @Param('provider') provider: string) {
+    assertIntegrationManager(user);
     return this.integrationsService.disconnect(user.organizationId, parseProvider(provider));
   }
 
@@ -157,4 +182,10 @@ function parseProvider(value: string) {
     throw new BadRequestException(`Unsupported provider ${value}`);
   }
   return normalized as IntegrationProvider;
+}
+
+function assertIntegrationManager(user: SessionUser) {
+  if (ROLE_HIERARCHY[user.role] < ROLE_HIERARCHY[Role.ADMIN]) {
+    throw new ForbiddenException('Admin access is required to manage integrations.');
+  }
 }

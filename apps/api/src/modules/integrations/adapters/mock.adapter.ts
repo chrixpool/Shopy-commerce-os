@@ -16,15 +16,15 @@ export abstract class MockAdapter implements IntegrationAdapter {
   }
 
   async getConnectionStatus(connection?: AdapterConnection | null) {
-    return connection?.config ? 'configured' : 'disconnected';
+    return connection?.credentials?.accessToken ? 'configured' : 'disconnected';
   }
 
   async testConnection(connection?: AdapterConnection | null) {
     return {
-      ok: Boolean(connection?.config),
-      message: connection?.config
+      ok: Boolean(connection?.credentials?.accessToken),
+      message: connection?.credentials?.accessToken
         ? `${this.label} metadata is configured. Live API checks are optional.`
-        : `${this.label} is not connected.`,
+        : `${this.label} needs a valid access token before it can be connected.`,
     };
   }
 

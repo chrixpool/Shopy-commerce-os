@@ -3,6 +3,8 @@ import { createRequire } from 'node:module';
 
 const require = createRequire(import.meta.url);
 const { MetaAdsAdapter } = require('../apps/api/dist/modules/integrations/adapters/meta-ads.adapter.js');
+const { IntegrationsService } = require('../apps/api/dist/modules/integrations/integrations.service.js');
+const { IntegrationSecretsService } = require('../apps/api/dist/modules/integrations/crypto/integration-secrets.service.js');
 const adapter = new MetaAdsAdapter();
 const originalFetch = globalThis.fetch;
 
@@ -58,7 +60,80 @@ async function run() {
       : response({ data: [] });
   assert.equal((await adapter.testConnection(connection)).code, 'NO_AD_ACCOUNTS');
 
-  console.log('Meta Ads read-only smoke passed: valid, sync, expired, permission, accounts.');
+  const previousKey = process.env.INTEGRATION_SECRET_KEY;
+  process.env.INTEGRATION_SECRET_KEY = 'test-only-integration-key';
+  const secrets = new IntegrationSecretsService();
+  const encrypted = secrets.encrypt('private-token');
+  const replacement = secrets.encrypt('replacement-token');
+  assert.equal(JSON.stringify(encrypted).includes('private-token'), false);
+  assert.equal(secrets.decrypt(encrypted), 'private-token');
+  assert.notDeepEqual(encrypted, replacement);
+  assert.equal(adapter.capabilities().canLaunchAds, false);
+
+  const runs = new Map();
+  let sequence = 0;
+  let disconnectUpdate;
+  const prisma = {
+    integration: {
+      findMany: async () => [
+        { provider: 'SHOPIFY', status: 'CONNECTED', isActive: true },
+        { provider: 'META_ADS', status: 'CONNECTED', isActive: true },
+      ],
+      upsert: async ({ update }) => {
+        disconnectUpdate = update;
+        return { provider: 'SHOPIFY', status: 'DISCONNECTED', isActive: false };
+      },
+    },
+    automationRun: {
+      findFirst: async ({ where }) =>
+        [...runs.values()].find(
+          (run) =>
+            run.organizationId === where.organizationId &&
+            (!where.id || run.id === where.id) &&
+            (!where.status || ['QUEUED', 'RUNNING'].includes(run.status)),
+        ) ?? null,
+      findMany: async ({ where }) =>
+        [...runs.values()].filter((run) => run.organizationId === where.organizationId),
+      create: async ({ data }) => {
+        const run = {
+          id: `run_${++sequence}`,
+          startedAt: new Date(),
+          finishedAt: null,
+          ...data,
+        };
+        runs.set(run.id, run);
+        return run;
+      },
+      update: async ({ where, data }) => {
+        const run = { ...runs.get(where.id), ...data };
+        runs.set(where.id, run);
+        return run;
+      },
+    },
+  };
+  const service = new IntegrationsService(prisma, secrets);
+  service.test = async () => ({ ok: true, message: 'valid' });
+  service.sync = async (_organizationId, provider) =>
+    provider === 'META_ADS'
+      ? { ok: false, counts: {}, warnings: ['sanitized'] }
+      : { ok: true, counts: { found: 2, created: 1 }, warnings: [] };
+  const first = await service.startSyncAll('org_one', 'user_one');
+  const duplicate = await service.startSyncAll('org_one', 'user_one');
+  assert.equal(duplicate.id, first.id);
+  await new Promise((resolve) => setTimeout(resolve, 80));
+  const completed = await service.syncAllRun('org_one', first.id);
+  assert.equal(completed.status, 'partial');
+  assert.equal(completed.providers.find((item) => item.provider === 'SHOPIFY').status, 'success');
+  assert.equal(completed.providers.find((item) => item.provider === 'META_ADS').status, 'failed');
+  await assert.rejects(() => service.syncAllRun('org_other', first.id));
+  await service.disconnect('org_one', 'SHOPIFY');
+  assert.deepEqual(disconnectUpdate.encryptedCredentials, {});
+  assert.deepEqual(disconnectUpdate.credentials, {});
+
+  if (previousKey === undefined) delete process.env.INTEGRATION_SECRET_KEY;
+  else process.env.INTEGRATION_SECRET_KEY = previousKey;
+
+  console.log('Integration smoke passed: Meta diagnostics, encryption, sync-all isolation and partial success.');
 }
 
 run()
