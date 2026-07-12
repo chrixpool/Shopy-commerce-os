@@ -97,6 +97,62 @@ export function StatusBadge({
   return <span className={`badge badge-${tone}`}>{children}</span>;
 }
 
+export function BusinessAlert({
+  title,
+  description,
+  tone = 'info',
+  action,
+}: {
+  title: string;
+  description: string;
+  tone?: 'success' | 'warning' | 'info' | 'danger';
+  action?: ReactNode;
+}) {
+  return (
+    <div className={`business-alert business-alert-${tone}`} role="status">
+      <span className="business-alert-mark" aria-hidden="true" />
+      <div className="business-alert-copy">
+        <strong>{title}</strong>
+        <span>{description}</span>
+      </div>
+      {action ? <div className="business-alert-action">{action}</div> : null}
+    </div>
+  );
+}
+
+export function TrendIndicator({
+  value,
+  direction = 'neutral',
+}: {
+  value: string;
+  direction?: 'up' | 'down' | 'neutral';
+}) {
+  return <span className={`trend trend-${direction}`}>{value}</span>;
+}
+
+export function ProgressSummary({
+  label,
+  value,
+  total,
+}: {
+  label: string;
+  value: number;
+  total: number;
+}) {
+  const percent = total > 0 ? Math.min(100, Math.max(0, (value / total) * 100)) : 0;
+  return (
+    <div className="progress-summary">
+      <div>
+        <span>{label}</span>
+        <strong>{Math.round(percent)}%</strong>
+      </div>
+      <span className="progress-track">
+        <span style={{ width: `${percent}%` }} />
+      </span>
+    </div>
+  );
+}
+
 interface EmptyStateProps {
   icon: string;
   title: string;

@@ -110,15 +110,16 @@ export function Sidebar({ locale, isExpanded }: { locale: string; isExpanded: bo
 
       <nav aria-label="Main navigation">
         <NavGroup title="Operate" items={WORK_ITEMS} locale={locale} pathname={pathname} />
-        <NavGroup title="Grow" items={GROWTH_ITEMS} locale={locale} pathname={pathname} />
+        <NavGroup title="Analyze" items={GROWTH_ITEMS} locale={locale} pathname={pathname} />
         <NavGroup title="Manage" items={ADMIN_ITEMS} locale={locale} pathname={pathname} />
       </nav>
 
       <div className="sidebar-footer">
-        <span className="badge badge-info">Operations workspace</span>
-        <p className="section-description">
-          Read-only integrations, approval-gated automation, and database-backed queues are active.
-        </p>
+        <span className="workspace-pulse" aria-hidden="true" />
+        <div className="sidebar-footer-copy">
+          <strong>Workspace online</strong>
+          <span>Read-only integrations</span>
+        </div>
       </div>
     </aside>
   );

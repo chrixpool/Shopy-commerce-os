@@ -85,9 +85,9 @@ export function Topbar({ session, locale, onMenuClick }: TopbarProps) {
       </div>
 
       <div className="topbar-actions">
-        <div className="search-box" role="search" aria-label="Workspace search">
-          <span aria-hidden="true">Search</span>
-          <span style={{ marginInlineStart: 'auto' }}>Ctrl K</span>
+        <div className="topbar-status" aria-label="Workspace status">
+          <span className="workspace-pulse" aria-hidden="true" />
+          <span>Live operations</span>
         </div>
 
         <select
