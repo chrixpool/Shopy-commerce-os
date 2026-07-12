@@ -72,12 +72,19 @@ async function classify(organizationId) {
         { externalId: { startsWith: 'smoke-order-' } },
         { notes: 'Seed demo order' },
         { notes: { startsWith: 'SMOKE:' } },
+        {
+          customerName: 'Smoke Test Customer',
+          items: { some: { name: 'Smoke Test Product' } },
+        },
         { events: { some: { type: 'seeded' } } },
       ],
     },
-    select: { id: true },
+    select: { id: true, customerId: true },
   });
   const seedOrderIds = seedOrders.map((order) => order.id);
+  const seedCustomerIds = seedOrders
+    .map((order) => order.customerId)
+    .filter((id) => typeof id === 'string');
 
   const seedProducts = await prisma.product.findMany({
     where: {
@@ -100,7 +107,13 @@ async function classify(organizationId) {
   });
   const seedParcelIds = seedParcels.map((parcel) => parcel.id);
   const smokeAutomations = await prisma.automation.findMany({
-    where: { organizationId, name: { startsWith: 'SMOKE:' } },
+    where: {
+      organizationId,
+      OR: [
+        { name: { startsWith: 'SMOKE:' } },
+        { name: { startsWith: 'Smoke dry-run automation ' } },
+      ],
+    },
     select: { id: true },
   });
   const smokeAutomationIds = smokeAutomations.map((automation) => automation.id);
@@ -136,11 +149,19 @@ async function classify(organizationId) {
     }),
   };
 
-  return { seedOrderIds, seedProductIds, seedParcelIds, smokeAutomationIds, uncertain };
+  return {
+    seedOrderIds,
+    seedCustomerIds,
+    seedProductIds,
+    seedParcelIds,
+    smokeAutomationIds,
+    uncertain,
+  };
 }
 
 async function collectCounts(organizationId, classified) {
-  const { seedOrderIds, seedProductIds, seedParcelIds, smokeAutomationIds } = classified;
+  const { seedOrderIds, seedCustomerIds, seedProductIds, seedParcelIds, smokeAutomationIds } =
+    classified;
   const [
     orderCostSnapshots,
     parcelEvents,
@@ -175,8 +196,11 @@ async function collectCounts(organizationId, classified) {
     prisma.customer.count({
       where: {
         organizationId,
-        phone: { in: seedPhones },
-        orders: { none: { id: { notIn: seedOrderIds } } },
+        OR: [
+          { phone: { in: seedPhones } },
+          { id: { in: seedCustomerIds } },
+        ],
+        orders: { every: { id: { in: seedOrderIds } } },
       },
     }),
     prisma.automationRun.count({
@@ -195,6 +219,7 @@ async function collectCounts(organizationId, classified) {
         OR: [
           { payload: { path: ['seeded'], equals: true } },
           { title: { startsWith: 'SMOKE:' } },
+          { title: { startsWith: 'Smoke dry-run automation ' } },
         ],
       },
     }),
@@ -223,7 +248,8 @@ async function collectCounts(organizationId, classified) {
 }
 
 async function executeCleanup(organizationId, classified) {
-  const { seedOrderIds, seedProductIds, seedParcelIds, smokeAutomationIds } = classified;
+  const { seedOrderIds, seedCustomerIds, seedProductIds, seedParcelIds, smokeAutomationIds } =
+    classified;
   return prisma.$transaction(async (tx) => {
     const deleted = zeroCounts();
     deleted.OrderCostSnapshot = (
@@ -259,7 +285,11 @@ async function executeCleanup(organizationId, classified) {
     ).count;
     deleted.Customer = (
       await tx.customer.deleteMany({
-        where: { organizationId, phone: { in: seedPhones }, orders: { none: {} } },
+        where: {
+          organizationId,
+          OR: [{ phone: { in: seedPhones } }, { id: { in: seedCustomerIds } }],
+          orders: { none: {} },
+        },
       })
     ).count;
     deleted.AutomationRun = (
@@ -280,6 +310,7 @@ async function executeCleanup(organizationId, classified) {
           OR: [
             { payload: { path: ['seeded'], equals: true } },
             { title: { startsWith: 'SMOKE:' } },
+            { title: { startsWith: 'Smoke dry-run automation ' } },
           ],
         },
       })
