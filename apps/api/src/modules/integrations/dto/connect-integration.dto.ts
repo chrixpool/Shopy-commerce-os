@@ -5,6 +5,10 @@ const SHOPIFY_CONNECTION_METHODS = ['CLIENT_CREDENTIALS', 'ADMIN_TOKEN'] as cons
 
 export class ConnectIntegrationDto {
   @IsOptional()
+  @IsString()
+  connectionName?: string;
+
+  @IsOptional()
   @IsIn(SHOPIFY_CONNECTION_METHODS)
   connectionMethod?: string;
 

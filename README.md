@@ -49,7 +49,8 @@ For local testing, add only the provider values you actually need:
 - `SHOPIFY_SHOP_DOMAIN`, `SHOPIFY_CLIENT_ID`, `SHOPIFY_CLIENT_SECRET`: optional Shopify simple setup for read-only sync.
 - `SHOPIFY_ADMIN_ACCESS_TOKEN`: optional advanced Shopify fallback.
 - `SHOPIFY_WEBHOOK_SECRET`: optional Shopify webhook validation.
-- `META_ACCESS_TOKEN`, `META_AD_ACCOUNT_ID`: optional Meta Ads read-only reporting.
+- `META_ACCESS_TOKEN`: optional Meta Ads read-only reporting token. Ad accounts are discovered after validation; operators select one in Settings.
+- `META_API_VERSION`: optional Graph API version override (defaults to `v23.0`).
 - `FACEBOOK_PAGE_ID`, `FACEBOOK_PAGE_ACCESS_TOKEN`: optional Facebook Page read-only reporting.
 - `INSTAGRAM_BUSINESS_ACCOUNT_ID`, `INSTAGRAM_ACCESS_TOKEN`: optional Instagram read-only reporting.
 

@@ -21,9 +21,10 @@ import type { IntegrationAdapter } from './adapters/integration-adapter.interfac
 import type { ConnectIntegrationDto, SyncIntegrationDto } from './dto/connect-integration.dto';
 import type { CreateDraftActionDto, UpdateDraftActionStatusDto } from './dto/draft-action.dto';
 
+const META_ADS_ADAPTER = new MetaAdsAdapter();
 const ADAPTERS: IntegrationAdapter[] = [
   new ShopifyAdapter(),
-  new MetaAdsAdapter(),
+  META_ADS_ADAPTER,
   new FacebookPageAdapter(),
   new InstagramAdapter(),
   new CsvAdapter(),
@@ -102,7 +103,9 @@ export class IntegrationsService {
         config:
           provider === IntegrationProvider.SHOPIFY
             ? sanitizeShopifyConfig(row?.config)
-            : sanitizeConfig(row?.config),
+            : provider === IntegrationProvider.META_ADS
+              ? sanitizeMetaConfig(row?.config)
+              : sanitizeConfig(row?.config),
       };
     });
   }
@@ -241,8 +244,32 @@ export class IntegrationsService {
         config.shop = test.shop;
       }
     }
+    if (provider === IntegrationProvider.META_ADS) {
+      const metaTest = test as Awaited<ReturnType<MetaAdsAdapter['testConnection']>>;
+      config.lastTestAt = new Date().toISOString();
+      config.permissions = metaTest.permissions;
+      config.accounts = metaTest.accounts.map((account) => ({
+        id: maskAccountId(account.id),
+        reference: account.id,
+        name: account.name,
+        accountStatus: account.accountStatus,
+        currency: account.currency,
+        timezone: account.timezone,
+      }));
+      if (metaTest.selectedAccount) {
+        config.accountId = metaTest.selectedAccount.id;
+        config.account = {
+          name: metaTest.selectedAccount.name,
+          reference: maskAccountId(metaTest.selectedAccount.id),
+          accountStatus: metaTest.selectedAccount.accountStatus,
+          currency: metaTest.selectedAccount.currency,
+          timezone: metaTest.selectedAccount.timezone,
+        };
+      }
+      config.diagnosticCode = metaTest.code;
+    }
 
-    return this.prisma.integration.upsert({
+    const saved = await this.prisma.integration.upsert({
       where: { organizationId_provider: { organizationId, provider } },
       update: {
         isActive: test.ok,
@@ -274,6 +301,15 @@ export class IntegrationsService {
         errorMessage: true,
       },
     });
+    return {
+      ...saved,
+      config:
+        provider === IntegrationProvider.SHOPIFY
+          ? sanitizeShopifyConfig(saved.config)
+          : provider === IntegrationProvider.META_ADS
+            ? sanitizeMetaConfig(saved.config)
+            : sanitizeConfig(saved.config),
+    };
   }
 
   async test(organizationId: string, provider: IntegrationProvider) {
@@ -281,7 +317,96 @@ export class IntegrationsService {
     if (provider === IntegrationProvider.SHOPIFY) {
       return this.testShopifyConnection(current?.connection ?? null);
     }
-    return this.adapter(provider).testConnection(current?.connection ?? null);
+    const result = await this.adapter(provider).testConnection(current?.connection ?? null);
+    if (provider === IntegrationProvider.META_ADS && current) {
+      const metaResult = result as Awaited<ReturnType<MetaAdsAdapter['testConnection']>>;
+      await this.prisma.integration.update({
+        where: { id: current.integration.id },
+        data: {
+          status: metaResult.ok ? IntegrationStatus.CONNECTED : IntegrationStatus.ERROR,
+          isActive: metaResult.ok,
+          errorMessage: metaResult.ok ? null : metaResult.message,
+          config: {
+            ...asRecord(current.integration.config),
+            lastTestAt: new Date().toISOString(),
+            diagnosticCode: metaResult.code,
+            permissions: metaResult.permissions,
+          },
+        },
+      });
+    }
+    if (provider === IntegrationProvider.META_ADS) {
+      const metaResult = result as Awaited<ReturnType<MetaAdsAdapter['testConnection']>>;
+      return {
+        ok: metaResult.ok,
+        code: metaResult.code,
+        message: metaResult.message,
+        permissions: metaResult.permissions,
+        accountCount: metaResult.accounts.length,
+        selectedAccount: metaResult.selectedAccount
+          ? {
+              name: metaResult.selectedAccount.name,
+              reference: maskAccountId(metaResult.selectedAccount.id),
+            }
+          : null,
+      };
+    }
+    return result;
+  }
+
+  async metaAccounts(organizationId: string) {
+    const current = await this.connection(organizationId, IntegrationProvider.META_ADS);
+    if (!current) throw new NotFoundException('Meta Ads is not connected');
+    const result = await META_ADS_ADAPTER.discoverAccounts(current.connection);
+    return {
+      ok: result.ok,
+      code: result.code,
+      message: result.message,
+      accounts: result.accounts.map((account) => ({
+        id: account.id,
+        name: account.name,
+        reference: maskAccountId(account.id),
+        accountStatus: account.accountStatus,
+        currency: account.currency,
+        timezone: account.timezone,
+      })),
+    };
+  }
+
+  async selectMetaAccount(organizationId: string, accountId: string) {
+    const current = await this.connection(organizationId, IntegrationProvider.META_ADS);
+    if (!current) throw new NotFoundException('Meta Ads is not connected');
+    const normalized = accountId.startsWith('act_') ? accountId : `act_${accountId}`;
+    const connection = {
+      ...current.connection,
+      config: { ...current.connection.config, accountId: normalized },
+    };
+    const result = await META_ADS_ADAPTER.testConnection(connection);
+    if (!result.ok || !result.selectedAccount) throw new BadRequestException(result.message);
+    const nextConfig = {
+      ...asRecord(current.integration.config),
+      accountId: normalized,
+      account: {
+        name: result.selectedAccount.name,
+        reference: maskAccountId(normalized),
+        accountStatus: result.selectedAccount.accountStatus,
+        currency: result.selectedAccount.currency,
+        timezone: result.selectedAccount.timezone,
+      },
+      permissions: result.permissions,
+      diagnosticCode: result.code,
+      lastTestAt: new Date().toISOString(),
+    };
+    await this.prisma.integration.update({
+      where: { id: current.integration.id },
+      data: {
+        config: nextConfig,
+        status: IntegrationStatus.CONNECTED,
+        isActive: true,
+        errorMessage: null,
+      },
+    });
+    return { ok: true, account: nextConfig.account };
   }
 
   async sync(organizationId: string, provider: IntegrationProvider, dto: SyncIntegrationDto = {}) {
@@ -331,6 +456,9 @@ export class IntegrationsService {
         };
       }
     }
+    if (provider === IntegrationProvider.META_ADS) {
+      return this.syncMetaAds(current.integration.id, current.connection, dryRun);
+    }
     const result = await this.adapter(provider).sync(current.connection, dryRun);
 
     const run = await this.prisma.automationRun.create({
@@ -355,8 +483,8 @@ export class IntegrationsService {
   }
 
   async disconnect(organizationId: string, provider: IntegrationProvider) {
-    if (provider !== IntegrationProvider.SHOPIFY) {
-      throw new BadRequestException('Only Shopify disconnect is supported by this endpoint.');
+    if (provider !== IntegrationProvider.SHOPIFY && provider !== IntegrationProvider.META_ADS) {
+      throw new BadRequestException('This provider cannot be disconnected from this endpoint.');
     }
     return this.prisma.integration.upsert({
       where: { organizationId_provider: { organizationId, provider } },
@@ -390,6 +518,119 @@ export class IntegrationsService {
       orderBy: { startedAt: 'desc' },
       take: 25,
     });
+  }
+
+  private async syncMetaAds(
+    integrationId: string,
+    connection: {
+      organizationId: string;
+      config: Record<string, unknown>;
+      credentials: Record<string, unknown>;
+    },
+    dryRun: boolean,
+  ) {
+    const startedAt = new Date();
+    try {
+      const result = await META_ADS_ADAPTER.sync(connection, dryRun);
+      const records = Array.isArray(result.records) ? result.records : [];
+      let created = 0;
+      let updated = 0;
+      if (!dryRun) {
+        for (const raw of records) {
+          const row = asRecord(raw);
+          const existing = await this.prisma.campaign.findUnique({
+            where: {
+              organizationId_externalId: {
+                organizationId: connection.organizationId,
+                externalId: String(row.id),
+              },
+            },
+          });
+          const campaign = await this.prisma.campaign.upsert({
+            where: {
+              organizationId_externalId: {
+                organizationId: connection.organizationId,
+                externalId: String(row.id),
+              },
+            },
+            update: {
+              name: String(row.name),
+              status: String(row.status),
+              objective: row.objective ? String(row.objective) : null,
+            },
+            create: {
+              organizationId: connection.organizationId,
+              externalId: String(row.id),
+              name: String(row.name),
+              status: String(row.status),
+              objective: row.objective ? String(row.objective) : null,
+            },
+          });
+          if (existing) updated += 1;
+          else created += 1;
+          if (row.dateStop) {
+            await this.prisma.campaignMetric.upsert({
+              where: {
+                campaignId_date: { campaignId: campaign.id, date: new Date(String(row.dateStop)) },
+              },
+              update: metaMetricData(row),
+              create: {
+                campaignId: campaign.id,
+                date: new Date(String(row.dateStop)),
+                ...metaMetricData(row),
+              },
+            });
+          }
+        }
+        await this.prisma.integration.update({
+          where: { id: integrationId },
+          data: { lastSyncAt: new Date(), status: IntegrationStatus.CONNECTED, errorMessage: null },
+        });
+      }
+      const output = {
+        ...result,
+        counts: { ...result.counts, created, updated },
+        dateRange: { preset: 'last_30d' },
+        startedAt: startedAt.toISOString(),
+        finishedAt: new Date().toISOString(),
+      };
+      const run = await this.prisma.automationRun.create({
+        data: {
+          organizationId: connection.organizationId,
+          status: 'SUCCESS',
+          dryRun,
+          inputSnapshot: { provider: IntegrationProvider.META_ADS, dateRange: 'last_30d' },
+          outputSnapshot: output as unknown as Prisma.InputJsonValue,
+          finishedAt: new Date(),
+        },
+      });
+      return { ...output, runId: run.id };
+    } catch {
+      const message =
+        'Meta Ads sync could not complete. Test the connection and review permissions.';
+      await this.prisma.integration.update({
+        where: { id: integrationId },
+        data: { status: IntegrationStatus.ERROR, errorMessage: message },
+      });
+      const run = await this.prisma.automationRun.create({
+        data: {
+          organizationId: connection.organizationId,
+          status: 'FAILED',
+          dryRun,
+          inputSnapshot: { provider: IntegrationProvider.META_ADS },
+          outputSnapshot: { warnings: [message] },
+          errorMessage: message,
+          finishedAt: new Date(),
+        },
+      });
+      return {
+        provider: IntegrationProvider.META_ADS,
+        ok: false,
+        dryRun,
+        warnings: [message],
+        runId: run.id,
+      };
+    }
   }
 
   private async prepareShopifyConnection(
@@ -932,13 +1173,38 @@ export class IntegrationsService {
   }
 
   async marketingSummary(organizationId: string) {
-    const [campaigns, draftActions] = await Promise.all([
+    const [campaigns, draftActions, metrics] = await Promise.all([
       this.prisma.campaign.count({ where: { organizationId } }),
       this.prisma.draftAction.count({
         where: { organizationId, provider: { in: ['META_ADS', 'FACEBOOK_PAGE', 'INSTAGRAM'] } },
       }),
+      this.prisma.campaignMetric.findMany({
+        where: { campaign: { organizationId } },
+        orderBy: { date: 'desc' },
+      }),
     ]);
-    return { campaigns, draftActions, spend: 0, clicks: 0, conversions: 0 };
+    const totals = metrics.reduce(
+      (sum, metric) => ({
+        spend: sum.spend + Number(metric.spend),
+        impressions: sum.impressions + metric.impressions,
+        clicks: sum.clicks + metric.clicks,
+        conversions: sum.conversions + metric.conversions,
+        reportedValue: sum.reportedValue + Number(metric.revenue),
+      }),
+      { spend: 0, impressions: 0, clicks: 0, conversions: 0, reportedValue: 0 },
+    );
+    return {
+      campaigns,
+      draftActions,
+      ...totals,
+      ctr: totals.impressions ? (totals.clicks / totals.impressions) * 100 : null,
+      cpc: totals.clicks ? totals.spend / totals.clicks : null,
+      cpm: totals.impressions ? (totals.spend / totals.impressions) * 1000 : null,
+      roas:
+        totals.reportedValue > 0 && totals.spend > 0 ? totals.reportedValue / totals.spend : null,
+      metricSource: 'Meta Ads',
+      dateRange: 'Latest synced 30-day snapshots',
+    };
   }
 
   async campaigns(organizationId: string) {
@@ -1043,6 +1309,43 @@ function sanitizeShopifyConfig(value: unknown): Record<string, unknown> {
   };
 }
 
+function sanitizeMetaConfig(value: unknown): Record<string, unknown> {
+  const config = sanitizeConfig(value);
+  const account = asRecord(config.account);
+  return {
+    connectionName: config.connectionName ?? 'Meta Ads',
+    diagnosticCode: config.diagnosticCode ?? null,
+    permissions: Array.isArray(config.permissions) ? config.permissions.map(String) : [],
+    account: Object.keys(account).length ? account : null,
+    lastTestAt: config.lastTestAt ?? null,
+    tokenExpiresAt: config.tokenExpiresAt ?? null,
+  };
+}
+
+function maskAccountId(value: string) {
+  const suffix = value.replace(/^act_/, '').slice(-4);
+  return suffix ? `act_••••${suffix}` : 'Unavailable';
+}
+
+function metaMetricData(row: Record<string, unknown>) {
+  const spend = Number(row.spend ?? 0);
+  const impressions = Math.max(0, Math.round(Number(row.impressions ?? 0)));
+  const clicks = Math.max(0, Math.round(Number(row.clicks ?? 0)));
+  const conversions = Math.max(0, Math.round(Number(row.conversions ?? 0)));
+  const reportedValue = Number(row.purchaseValue ?? 0);
+  return {
+    spend,
+    impressions,
+    clicks,
+    conversions,
+    revenue: reportedValue,
+    cpc: row.cpc == null ? null : Number(row.cpc),
+    ctr: row.ctr == null ? null : Number(row.ctr),
+    cpm: row.cpm == null ? null : Number(row.cpm),
+    roas: reportedValue > 0 && spend > 0 ? reportedValue / spend : null,
+  };
+}
+
 function providerConfig(provider: IntegrationProvider, dto: ConnectIntegrationDto) {
   if (provider === IntegrationProvider.SHOPIFY) {
     const connectionMethod = normalizeShopifyConnectionMethod(dto.connectionMethod);
@@ -1055,7 +1358,11 @@ function providerConfig(provider: IntegrationProvider, dto: ConnectIntegrationDt
     );
   }
   if (provider === IntegrationProvider.META_ADS) {
-    return { accountId: dto.accountId ?? null, metadata: dto.metadata ?? {} };
+    return {
+      connectionName: dto.connectionName?.trim() || 'Meta Ads',
+      accountId: dto.accountId ?? null,
+      metadata: dto.metadata ?? {},
+    };
   }
   if (provider === IntegrationProvider.FACEBOOK_PAGE) {
     return { pageId: dto.pageId ?? null, metadata: dto.metadata ?? {} };

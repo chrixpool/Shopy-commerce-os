@@ -53,6 +53,17 @@ export class IntegrationsController {
     return this.integrationsService.test(user.organizationId, parseProvider(provider));
   }
 
+  @Get('integrations/meta-ads/accounts')
+  metaAccounts(@CurrentUser() user: SessionUser) {
+    return this.integrationsService.metaAccounts(user.organizationId);
+  }
+
+  @Post('integrations/meta-ads/select-account')
+  selectMetaAccount(@CurrentUser() user: SessionUser, @Body() dto: ConnectIntegrationDto) {
+    if (!dto.accountId) throw new BadRequestException('Select an accessible ad account.');
+    return this.integrationsService.selectMetaAccount(user.organizationId, dto.accountId);
+  }
+
   @Post('integrations/:provider/sync')
   sync(
     @CurrentUser() user: SessionUser,

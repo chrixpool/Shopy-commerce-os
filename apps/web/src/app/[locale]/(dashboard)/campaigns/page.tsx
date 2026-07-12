@@ -9,6 +9,14 @@ interface MarketingSummary {
   spend: number;
   clicks: number;
   conversions: number;
+  impressions: number;
+  reportedValue: number;
+  ctr: number | null;
+  cpc: number | null;
+  cpm: number | null;
+  roas: number | null;
+  metricSource: string;
+  dateRange: string;
 }
 
 interface Campaign {
@@ -16,6 +24,18 @@ interface Campaign {
   name: string;
   status: string;
   objective?: string | null;
+  metrics?: Array<{
+    date: string;
+    spend: string | number;
+    impressions: number;
+    clicks: number;
+    conversions: number;
+    revenue: string | number;
+    cpc?: string | number | null;
+    ctr?: string | number | null;
+    roas?: string | number | null;
+    cpm?: string | number | null;
+  }>;
 }
 
 async function optionalApiFetch<T>(path: string, fallback: T) {
@@ -50,18 +70,27 @@ export default async function CampaignsPage({ params }: { params: Promise<{ loca
       spend: 0,
       clicks: 0,
       conversions: 0,
+      impressions: 0,
+      reportedValue: 0,
+      ctr: null,
+      cpc: null,
+      cpm: null,
+      roas: null,
+      metricSource: 'Meta Ads',
+      dateRange: 'No synced period',
     }),
     optionalApiFetch<Campaign[]>('/api/v1/marketing/meta-ads/campaigns', []),
-    optionalApiFetch<Array<{ provider: string; status: string; mode: string }>>(
-      '/api/v1/integrations',
-      [],
-    ),
+    optionalApiFetch<
+      Array<{ provider: string; status: string; mode: string; config?: Record<string, unknown> }>
+    >('/api/v1/integrations', []),
     optionalApiFetch<{ baseCurrency: string }>('/api/v1/settings/organization', {
       baseCurrency: 'USD',
     }),
   ]);
 
   const meta = integrations.find((integration) => integration.provider === 'META_ADS');
+  const metaAccount = meta?.config?.account as Record<string, unknown> | undefined;
+  const reportingCurrency = String(metaAccount?.currency ?? settings.baseCurrency);
   const facebook = integrations.find((integration) => integration.provider === 'FACEBOOK_PAGE');
   const instagram = integrations.find((integration) => integration.provider === 'INSTAGRAM');
 
@@ -83,10 +112,17 @@ export default async function CampaignsPage({ params }: { params: Promise<{ loca
       <section className="stats-grid" aria-label="Marketing summary">
         <MetricCard
           label="Spend"
-          value={formatMoney(summary.spend, settings.baseCurrency, locale)}
+          value={formatMoney(summary.spend, reportingCurrency, locale)}
           help="Latest synced Meta spend. No budgets are changed."
           badge="Read-only"
           badgeTone="info"
+        />
+        <MetricCard
+          label="Impressions"
+          value={summary.impressions.toLocaleString(locale)}
+          help={`${summary.metricSource} · ${summary.dateRange}`}
+          badge="Reported"
+          badgeTone="muted"
         />
         <MetricCard
           label="Campaigns"
@@ -94,6 +130,31 @@ export default async function CampaignsPage({ params }: { params: Promise<{ loca
           help="Campaign records currently available."
           badge={meta?.status ?? 'DISCONNECTED'}
           badgeTone={meta?.status === 'CONNECTED' ? 'success' : 'muted'}
+        />
+        <MetricCard
+          label="CTR"
+          value={summary.ctr == null ? 'Unavailable' : `${summary.ctr.toFixed(2)}%`}
+          help="Clicks divided by Meta-reported impressions."
+          badge="Reported"
+          badgeTone="info"
+        />
+        <MetricCard
+          label="CPC"
+          value={
+            summary.cpc == null
+              ? 'Unavailable'
+              : formatMoney(summary.cpc, reportingCurrency, locale)
+          }
+          help="Meta-reported spend divided by clicks."
+          badge="Reported"
+          badgeTone="info"
+        />
+        <MetricCard
+          label="ROAS"
+          value={summary.roas == null ? 'Unavailable' : `${summary.roas.toFixed(2)}×`}
+          help="Only shown when Meta reports purchase value."
+          badge={summary.roas == null ? 'No attribution' : 'Reported'}
+          badgeTone={summary.roas == null ? 'muted' : 'info'}
         />
         <MetricCard
           label="Clicks"
@@ -166,16 +227,59 @@ export default async function CampaignsPage({ params }: { params: Promise<{ loca
                 <th>Campaign</th>
                 <th>Status</th>
                 <th>Objective</th>
+                <th>Spend</th>
+                <th>Impressions</th>
+                <th>Clicks</th>
+                <th>CTR</th>
+                <th>CPC</th>
+                <th>Purchases</th>
+                <th>Reported value</th>
+                <th>ROAS</th>
+                <th>Last synced</th>
               </tr>
             </thead>
             <tbody>
-              {campaigns.map((campaign) => (
-                <tr key={campaign.id}>
-                  <td className="strong-cell">{campaign.name}</td>
-                  <td>{campaign.status}</td>
-                  <td>{campaign.objective ?? '-'}</td>
-                </tr>
-              ))}
+              {campaigns.map((campaign) => {
+                const metric = campaign.metrics?.[0];
+                return (
+                  <tr key={campaign.id}>
+                    <td className="strong-cell">{campaign.name}</td>
+                    <td>
+                      <StatusBadge tone={campaign.status === 'ACTIVE' ? 'success' : 'muted'}>
+                        {campaign.status}
+                      </StatusBadge>
+                    </td>
+                    <td>{campaign.objective ?? '-'}</td>
+                    <td>
+                      {metric
+                        ? formatMoney(metric.spend, reportingCurrency, locale)
+                        : 'Unavailable'}
+                    </td>
+                    <td>{metric ? metric.impressions.toLocaleString(locale) : 'Unavailable'}</td>
+                    <td>{metric ? metric.clicks.toLocaleString(locale) : 'Unavailable'}</td>
+                    <td>
+                      {metric?.ctr == null ? 'Unavailable' : `${Number(metric.ctr).toFixed(2)}%`}
+                    </td>
+                    <td>
+                      {metric?.cpc == null
+                        ? 'Unavailable'
+                        : formatMoney(metric.cpc, reportingCurrency, locale)}
+                    </td>
+                    <td>{metric ? metric.conversions.toLocaleString(locale) : 'Unavailable'}</td>
+                    <td>
+                      {metric && Number(metric.revenue) > 0
+                        ? formatMoney(metric.revenue, reportingCurrency, locale)
+                        : 'Unavailable'}
+                    </td>
+                    <td>
+                      {metric?.roas == null ? 'Unavailable' : `${Number(metric.roas).toFixed(2)}×`}
+                    </td>
+                    <td>
+                      {metric ? new Date(metric.date).toLocaleDateString(locale) : 'Not synced'}
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>

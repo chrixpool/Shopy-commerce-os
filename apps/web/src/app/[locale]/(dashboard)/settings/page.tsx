@@ -34,6 +34,20 @@ interface SyncRun {
   errorMessage?: string | null;
 }
 
+interface MetaAccountsResult {
+  ok: boolean;
+  code: string;
+  message: string;
+  accounts: Array<{
+    id: string;
+    name: string;
+    reference: string;
+    accountStatus?: number;
+    currency?: string;
+    timezone?: string;
+  }>;
+}
+
 interface ShopifyVerification {
   connectedShop?: string | null;
   status: string;
@@ -108,6 +122,7 @@ async function connectIntegration(formData: FormData) {
   await apiFetch(`/api/v1/integrations/${provider.toLowerCase().replaceAll('_', '-')}/connect`, {
     method: 'POST',
     body: JSON.stringify({
+      connectionName: String(formData.get('connectionName') ?? ''),
       connectionMethod: String(formData.get('connectionMethod') ?? ''),
       shopDomain: String(formData.get('shopDomain') ?? ''),
       clientId: String(formData.get('clientId') ?? ''),
@@ -123,6 +138,16 @@ async function connectIntegration(formData: FormData) {
   });
 
   revalidatePath('/[locale]/settings', 'page');
+}
+
+async function selectMetaAccount(formData: FormData) {
+  'use server';
+  await apiFetch('/api/v1/integrations/meta-ads/select-account', {
+    method: 'POST',
+    body: JSON.stringify({ accountId: String(formData.get('accountId') ?? '') }),
+  });
+  revalidatePath('/[locale]/settings', 'page');
+  revalidatePath('/[locale]/campaigns', 'page');
 }
 
 async function syncIntegration(formData: FormData) {
@@ -171,16 +196,22 @@ async function disconnectIntegration(formData: FormData) {
 
 export default async function SettingsPage({ params }: { params: Promise<{ locale: string }> }) {
   const { locale } = await params;
-  const [organization, integrations, shopifySyncRuns, shopifyVerification] = await Promise.all([
-    apiFetch<Organization>('/api/v1/settings/organization'),
-    optionalApiFetch<Integration[]>('/api/v1/integrations', FALLBACK_INTEGRATIONS),
-    optionalApiFetch<SyncRun[]>('/api/v1/integrations/shopify/sync-runs', [], 1200),
-    optionalApiFetch<ShopifyVerification | null>(
-      '/api/v1/integrations/shopify/verification',
-      null,
-      1200,
-    ),
-  ]);
+  const [organization, integrations, shopifySyncRuns, shopifyVerification, metaAccounts] =
+    await Promise.all([
+      apiFetch<Organization>('/api/v1/settings/organization'),
+      optionalApiFetch<Integration[]>('/api/v1/integrations', FALLBACK_INTEGRATIONS),
+      optionalApiFetch<SyncRun[]>('/api/v1/integrations/shopify/sync-runs', [], 1200),
+      optionalApiFetch<ShopifyVerification | null>(
+        '/api/v1/integrations/shopify/verification',
+        null,
+        1200,
+      ),
+      optionalApiFetch<MetaAccountsResult | null>(
+        '/api/v1/integrations/meta-ads/accounts',
+        null,
+        3200,
+      ),
+    ]);
   const connectedCount = integrations.filter(
     (integration) => integration.status === 'CONNECTED',
   ).length;
@@ -442,10 +473,21 @@ export default async function SettingsPage({ params }: { params: Promise<{ local
                       </>
                     ) : null}
                     {integration.provider === 'META_ADS' ? (
-                      <label className="form-field" style={{ gridColumn: '1 / -1' }}>
-                        <span>Ad account ID</span>
-                        <input className="field" name="accountId" placeholder="act_..." />
-                      </label>
+                      <>
+                        <label className="form-field" style={{ gridColumn: '1 / -1' }}>
+                          <span>Connection name</span>
+                          <input
+                            className="field"
+                            name="connectionName"
+                            placeholder="Meta Ads reporting"
+                            defaultValue={String(integration.config?.connectionName ?? 'Meta Ads')}
+                          />
+                        </label>
+                        <p className="field-help" style={{ gridColumn: '1 / -1' }}>
+                          Shopy validates the token and discovers accessible ad accounts. It never
+                          creates ads, changes campaigns, or edits budgets.
+                        </p>
+                      </>
                     ) : null}
                     {integration.provider === 'FACEBOOK_PAGE' ? (
                       <label className="form-field" style={{ gridColumn: '1 / -1' }}>
@@ -476,7 +518,9 @@ export default async function SettingsPage({ params }: { params: Promise<{ local
                     ) : null}
                     <div className="form-actions">
                       <button className="button button-secondary" type="submit">
-                        {integration.provider === 'SHOPIFY' ? 'Connect & test' : 'Save connection'}
+                        {['SHOPIFY', 'META_ADS'].includes(integration.provider)
+                          ? 'Connect & test'
+                          : 'Save connection'}
                       </button>
                     </div>
                   </form>
@@ -513,6 +557,70 @@ export default async function SettingsPage({ params }: { params: Promise<{ local
                     </form>
                   ) : null}
                 </div>
+                {integration.provider === 'META_ADS' ? (
+                  <div className="integration-diagnostics">
+                    <div className="snapshot-grid">
+                      <div>
+                        <span className="metric-label">Connection</span>
+                        <strong>{String(integration.config?.connectionName ?? 'Meta Ads')}</strong>
+                      </div>
+                      <div>
+                        <span className="metric-label">Selected account</span>
+                        <strong>
+                          {String(
+                            (integration.config?.account as Record<string, unknown> | undefined)
+                              ?.name ?? 'Select after connecting',
+                          )}
+                        </strong>
+                      </div>
+                      <div>
+                        <span className="metric-label">Last tested</span>
+                        <strong>
+                          {integration.config?.lastTestAt
+                            ? new Date(String(integration.config.lastTestAt)).toLocaleString(locale)
+                            : 'Not tested'}
+                        </strong>
+                      </div>
+                    </div>
+                    {integration.errorMessage ? (
+                      <div className="status-banner" style={{ marginTop: 12 }}>
+                        <div>
+                          <strong>Connection needs attention</strong>
+                          <p>{integration.errorMessage}</p>
+                        </div>
+                      </div>
+                    ) : null}
+                    {metaAccounts?.accounts.length ? (
+                      <form
+                        action={selectMetaAccount}
+                        className="inline-form"
+                        style={{ marginTop: 12 }}
+                      >
+                        <select
+                          className="select-field"
+                          name="accountId"
+                          aria-label="Select Meta ad account"
+                          required
+                        >
+                          <option value="">Choose an accessible ad account</option>
+                          {metaAccounts.accounts.map((account) => (
+                            <option value={account.id} key={account.id}>
+                              {account.name} · {account.reference} ·{' '}
+                              {account.currency ?? 'Currency unavailable'}
+                            </option>
+                          ))}
+                        </select>
+                        <button className="button button-secondary" type="submit">
+                          Use account
+                        </button>
+                      </form>
+                    ) : null}
+                    <p className="field-help" style={{ marginTop: 10 }}>
+                      {metaAccounts?.message ??
+                        'Connect a token to validate ads_read permission and discover accounts.'}
+                    </p>
+                  </div>
+                ) : null}
                 {integration.errorMessage ? (
                   <p className="field-help">
                     Connection failed. Check store domain, scopes, or credentials. Provider note:{' '}
