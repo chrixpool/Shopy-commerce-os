@@ -404,7 +404,7 @@ export default async function SettingsPage({ params }: { params: Promise<{ local
             publish posts, or send messages automatically.
           </p>
           <div className="step-list" style={{ marginTop: 18 }}>
-            {['Read-only sync', 'Draft actions', 'Approval queue', 'Manual publish'].map(
+            {['Read-only sync', 'Draft actions', 'Approval queue', 'Explicit approval'].map(
               (item, index) => (
                 <div className="step-item" key={item}>
                   <span className="step-number">{index + 1}</span>

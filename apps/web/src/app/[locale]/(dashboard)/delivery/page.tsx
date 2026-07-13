@@ -326,7 +326,7 @@ export default async function DeliveryPage({ params }: { params: Promise<{ local
         <EmptyState
           icon="DL"
           title="No parcels"
-          description="Packed orders create parcel records automatically."
+          description="Link an existing Mes Colis barcode to begin read-only tracking."
         />
       ) : (
         <div className="table-wrap">

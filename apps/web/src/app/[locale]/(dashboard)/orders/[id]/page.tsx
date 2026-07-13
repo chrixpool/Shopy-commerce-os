@@ -446,7 +446,7 @@ export default async function OrderControlCenterPage({
         <WorkflowCard
           title="Delivery"
           status={order.parcel?.status ?? 'No parcel'}
-          description={order.parcel?.trackingNumber ?? 'Packing creates a parcel record.'}
+          description={order.parcel?.trackingNumber ?? 'No delivery tracking is linked yet.'}
         >
           {order.parcel ? (
             <form action={updateDelivery} className="inline-form">
@@ -486,7 +486,7 @@ export default async function OrderControlCenterPage({
               </button>
             </form>
           ) : (
-            <p className="field-help">Mark fulfillment packed to generate a parcel.</p>
+            <p className="field-help">Link an existing Mes Colis barcode from Delivery.</p>
           )}
         </WorkflowCard>
       </section>
