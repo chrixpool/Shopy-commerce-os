@@ -1672,12 +1672,31 @@ function sanitizeConfig(value: unknown) {
   );
 }
 
-function sanitizeShopifyConfig(value: unknown): Record<string, unknown> {
+export function sanitizeShopifyConfig(value: unknown): Record<string, unknown> {
   const config = sanitizeConfig(value);
   const scopes = Array.isArray(config.scopes) ? config.scopes.map(String) : [];
   const scopeReport = shopifyScopeReport(scopes);
+  const shop = asRecord(config.shop);
   return {
-    ...config,
+    shop: Object.keys(shop).length
+      ? {
+          name: shop.name ?? null,
+          domain: shop.domain ?? shop.myshopify_domain ?? config.shopDomain ?? null,
+          currency: shop.currency ?? null,
+        }
+      : null,
+    shopDomain: config.shopDomain ?? null,
+    apiVersion: config.apiVersion ?? null,
+    connectionMethod: config.connectionMethod ?? null,
+    scopes,
+    requiredScopes: Array.isArray(config.requiredScopes) ? config.requiredScopes.map(String) : [],
+    lastTestAt: config.lastTestAt ?? null,
+    lastSyncRunId: config.lastSyncRunId ?? null,
+    lastSyncTotals: config.lastSyncTotals ?? null,
+    webhookDuplicateCount: Number(config.webhookDuplicateCount ?? 0),
+    webhookSignatureFailures: Number(config.webhookSignatureFailures ?? 0),
+    lastValidWebhookAt: config.lastValidWebhookAt ?? null,
+    lastWebhookTopic: config.lastWebhookTopic ?? null,
     scopeReport,
     scopeWarnings: shopifyOperatorScopeWarnings(scopeReport),
   };

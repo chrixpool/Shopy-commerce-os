@@ -22,6 +22,9 @@ const {
 const {
   IntegrationSecretsService,
 } = require('../apps/api/dist/modules/integrations/crypto/integration-secrets.service.js');
+const {
+  sanitizeShopifyConfig,
+} = require('../apps/api/dist/modules/integrations/integrations.service.js');
 
 function context(role) {
   const request = {
@@ -79,6 +82,26 @@ const secrets = new IntegrationSecretsService();
 const encrypted = secrets.encrypt('sensitive-test-value');
 assert.notEqual(encrypted.value, 'sensitive-test-value');
 assert.equal(secrets.decrypt(encrypted), 'sensitive-test-value');
+
+const safeShopify = sanitizeShopifyConfig({
+  clientId: 'must-not-leave-api',
+  shopDomain: 'store.myshopify.com',
+  shop: {
+    name: 'Store',
+    domain: 'store.myshopify.com',
+    currency: 'TND',
+    email: 'must-not-leave-api@example.invalid',
+    phone: 'must-not-leave-api',
+    address1: 'must-not-leave-api',
+  },
+  scopes: ['read_orders'],
+});
+assert.equal('clientId' in safeShopify, false);
+assert.deepEqual(safeShopify.shop, {
+  name: 'Store',
+  domain: 'store.myshopify.com',
+  currency: 'TND',
+});
 
 const mesColisSource = fs.readFileSync(
   new URL('../apps/api/src/modules/integrations/mes-colis.service.ts', import.meta.url),
