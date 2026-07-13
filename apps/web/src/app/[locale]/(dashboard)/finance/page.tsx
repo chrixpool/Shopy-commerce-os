@@ -427,12 +427,7 @@ export default async function FinancePage({
             <EmptyState
               icon="FN"
               title="No financial activity yet"
-              description="Create or import orders to activate finance reporting."
-              action={
-                <Link className="button button-primary" href={`/${locale}/orders/new`} prefetch>
-                  New order
-                </Link>
-              }
+              description="Sync Shopify orders to activate finance reporting."
             />
           )}
         </SurfaceCard>

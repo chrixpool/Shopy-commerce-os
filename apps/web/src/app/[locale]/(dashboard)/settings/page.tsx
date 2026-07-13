@@ -294,7 +294,10 @@ export default async function SettingsPage({ params }: { params: Promise<{ local
     optionalApiFetch<WorkflowReconciliation | null>('/api/v1/workflows/reconciliation', null, 2200),
   ]);
   const latestSyncAll = syncAllRuns[0];
-  const connectedCount = integrations.filter(
+  const visibleIntegrations = integrations.filter(
+    (integration) => !['CSV', 'MANUAL'].includes(integration.provider),
+  );
+  const connectedCount = visibleIntegrations.filter(
     (integration) => integration.status === 'CONNECTED',
   ).length;
 
@@ -473,7 +476,7 @@ export default async function SettingsPage({ params }: { params: Promise<{ local
           </div>
         ) : null}
         <div className="queue-grid" style={{ marginTop: 18 }}>
-          {integrations.map((integration) => {
+          {visibleIntegrations.map((integration) => {
             const isExternal = [
               'SHOPIFY',
               'META_ADS',

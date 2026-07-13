@@ -1,6 +1,6 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { normalizeCurrencyCode, PlatformCurrencySchema } from '@shopy/shared';
-import { DeliveryStatus, OrderStatus, Prisma } from '@prisma/client';
+import { ConfirmationStatus, DeliveryStatus, OrderStatus, Prisma } from '@prisma/client';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import type { CreateOrderDto } from './dto/create-order.dto';
 import { assertOrderTransition } from '../workflows/workflow-transitions';
@@ -12,6 +12,9 @@ interface ListOrdersQuery {
   city?: string;
   dateFrom?: string;
   dateTo?: string;
+  confirmationStatus?: ConfirmationStatus | 'all';
+  deliveryStatus?: DeliveryStatus | 'all';
+  missingCost?: 'true' | 'false';
   page?: number;
   limit?: number;
 }
@@ -35,6 +38,26 @@ export class OrdersService {
       ...(status ? { status } : {}),
       ...(source && source !== 'all' ? { source } : {}),
       ...(Object.keys(createdAt).length ? { createdAt } : {}),
+      ...(query.confirmationStatus && query.confirmationStatus !== 'all'
+        ? { confirmationTask: { status: query.confirmationStatus } }
+        : {}),
+      ...(query.deliveryStatus && query.deliveryStatus !== 'all'
+        ? {
+            AND: [
+              {
+                OR: [
+                  { parcel: { status: query.deliveryStatus } },
+                  { providerParcels: { some: { normalizedStatus: query.deliveryStatus } } },
+                ],
+              },
+            ],
+          }
+        : {}),
+      ...(query.missingCost === 'true'
+        ? { costSnapshot: null }
+        : query.missingCost === 'false'
+          ? { costSnapshot: { isNot: null } }
+          : {}),
       ...(city ? { customer: { city: { contains: city } } } : {}),
       ...(search
         ? {
@@ -158,13 +181,62 @@ export class OrdersService {
     return { ...order, timeline: [] };
   }
 
+  async activity(organizationId: string, filters: { action?: string; source?: string } = {}) {
+    const events = await this.prisma.orderEvent.findMany({
+      where: {
+        order: { organizationId },
+        ...(filters.action ? { type: filters.action } : {}),
+        ...(filters.source
+          ? { data: { path: ['source'], equals: filters.source.toUpperCase() } }
+          : {}),
+      },
+      select: {
+        id: true,
+        type: true,
+        note: true,
+        data: true,
+        createdAt: true,
+        user: { select: { name: true, role: true } },
+        order: { select: { id: true, orderNumber: true } },
+      },
+      orderBy: { createdAt: 'desc' },
+      take: 100,
+    });
+
+    return events.map((event) => {
+      const data = (event.data ?? {}) as Record<string, unknown>;
+      const source = String(data.source ?? (event.user ? 'USER' : 'SYSTEM'));
+      return {
+        id: event.id,
+        action: event.type,
+        note: event.note,
+        source,
+        actor:
+          event.user?.name ??
+          (source === 'SHOPIFY'
+            ? 'Shopify'
+            : source === 'MES_COLIS'
+              ? 'Mes Colis'
+              : 'Legacy/System'),
+        actorRole: event.user?.role ?? null,
+        entityId: event.order.id,
+        entityReference: event.order.orderNumber,
+        createdAt: event.createdAt,
+      };
+    });
+  }
+
   async getTimeline(organizationId: string, id: string) {
     const order = await this.prisma.order.findFirst({
       where: { id, organizationId },
       select: {
         id: true,
         externalId: true,
-        events: { orderBy: { createdAt: 'desc' }, take: 25 },
+        events: {
+          orderBy: { createdAt: 'desc' },
+          take: 25,
+          include: { user: { select: { name: true, role: true } } },
+        },
         parcel: { include: { events: { orderBy: { timestamp: 'desc' }, take: 10 } } },
       },
     });
@@ -205,6 +277,8 @@ export class OrdersService {
         source: 'Order',
         type: event.type,
         title: event.note ?? event.type.replace(/_/g, ' '),
+        actor: event.user?.name ?? 'Legacy/System',
+        actorRole: event.user?.role ?? null,
         timestamp: event.createdAt,
       })),
       ...(order.parcel?.events ?? []).map((event) => ({

@@ -19,6 +19,6 @@ export class DeliveryController {
     @Param('id') id: string,
     @Body() dto: UpdateDeliveryDto,
   ) {
-    return this.workflowsService.updateDelivery(user.organizationId, user.id, id, dto.status);
+    return this.workflowsService.updateDelivery(user.organizationId, user, id, dto.status);
   }
 }

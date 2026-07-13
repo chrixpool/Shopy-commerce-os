@@ -1,6 +1,7 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { ConfirmationStatus, DeliveryStatus, FulfillmentStatus, OrderStatus } from '@prisma/client';
 import { PrismaService } from '../../core/prisma/prisma.service';
+import type { SessionUser } from '../../core/auth';
 import { ConfirmationAction, UpdateConfirmationDto } from './dto/update-confirmation.dto';
 import {
   assertConfirmationTransition,
@@ -135,7 +136,7 @@ export class WorkflowsService {
 
   async updateConfirmation(
     organizationId: string,
-    userId: string,
+    user: SessionUser,
     id: string,
     dto: UpdateConfirmationDto,
   ) {
@@ -180,10 +181,14 @@ export class WorkflowsService {
           events: {
             create: {
               type: 'confirmation_action',
-              userId,
+              userId: user.id,
               note: `Confirmation marked ${action.toLowerCase()}`,
               data: {
                 action,
+                actorName: user.name ?? 'Workspace user',
+                actorRole: user.role,
+                organizationId,
+                source: 'USER',
                 from: task.order.status,
                 to: orderStatus,
                 scheduledAt: dto.scheduledAt ?? null,
@@ -218,7 +223,7 @@ export class WorkflowsService {
 
   async updateFulfillment(
     organizationId: string,
-    userId: string,
+    user: SessionUser,
     id: string,
     status: FulfillmentStatus,
   ) {
@@ -269,33 +274,20 @@ export class WorkflowsService {
           events: {
             create: {
               type: 'fulfillment_action',
-              userId,
+              userId: user.id,
               note: `Fulfillment marked ${status.toLowerCase()}`,
-              data: { from: task.status, to: status },
+              data: {
+                from: task.status,
+                to: status,
+                actorName: user.name ?? 'Workspace user',
+                actorRole: user.role,
+                organizationId,
+                source: 'USER',
+              },
             },
           },
         },
       });
-
-      if (status === FulfillmentStatus.PACKED) {
-        const parcel = await tx.parcel.upsert({
-          where: { orderId: task.orderId },
-          update: { status: DeliveryStatus.PENDING_PICKUP, codAmount: task.order.totalAmount },
-          create: {
-            orderId: task.orderId,
-            status: DeliveryStatus.PENDING_PICKUP,
-            codAmount: task.order.totalAmount,
-            trackingNumber: `OPS-${task.orderId.slice(-8).toUpperCase()}`,
-          },
-        });
-        await tx.parcelEvent.create({
-          data: {
-            parcelId: parcel.id,
-            status: DeliveryStatus.PENDING_PICKUP,
-            note: 'Parcel created from packed order',
-          },
-        });
-      }
 
       return updated;
     });
@@ -312,7 +304,12 @@ export class WorkflowsService {
     });
   }
 
-  async updateDelivery(organizationId: string, userId: string, id: string, status: DeliveryStatus) {
+  async updateDelivery(
+    organizationId: string,
+    user: SessionUser,
+    id: string,
+    status: DeliveryStatus,
+  ) {
     const parcel = await this.prisma.parcel.findFirst({
       where: { id, order: { organizationId } },
       include: { order: true },
@@ -353,9 +350,17 @@ export class WorkflowsService {
           events: {
             create: {
               type: 'delivery_action',
-              userId,
+              userId: user.id,
               note: `Parcel marked ${status.toLowerCase()}`,
-              data: { from: parcel.status, to: status, orderStatus },
+              data: {
+                from: parcel.status,
+                to: status,
+                orderStatus,
+                actorName: user.name ?? 'Workspace user',
+                actorRole: user.role,
+                organizationId,
+                source: 'USER',
+              },
             },
           },
         },

@@ -511,14 +511,6 @@ export default async function DashboardPage({
         <SurfaceCard>
           <SectionHeader title="Quick actions" description="Move common work forward quickly." />
           <div className="quick-action-grid">
-            <Link className="quick-action" href={`/${locale}/orders/new`} prefetch>
-              <span>New order</span>
-              <small>Create a manual order</small>
-            </Link>
-            <Link className="quick-action" href={`/${locale}/orders`} prefetch>
-              <span>Import CSV</span>
-              <small>Add orders in bulk</small>
-            </Link>
             <Link className="quick-action" href={`/${locale}/confirmation`} prefetch>
               <span>Review calls</span>
               <small>Confirm pending orders</small>

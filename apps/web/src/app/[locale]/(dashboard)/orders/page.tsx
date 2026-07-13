@@ -36,6 +36,7 @@ interface OrdersResponse {
   total: number;
   page: number;
   totalPages: number;
+  limit: number;
 }
 
 interface OrdersSummary {
@@ -62,21 +63,6 @@ const STATUSES = [
   'REFUSED',
 ];
 
-async function updateStatus(formData: FormData) {
-  'use server';
-
-  const id = String(formData.get('id') ?? '');
-  const status = String(formData.get('status') ?? '');
-
-  await apiFetch(`/api/v1/orders/${id}/status`, {
-    method: 'PATCH',
-    body: JSON.stringify({ status }),
-  });
-
-  revalidatePath('/[locale]/orders', 'page');
-  revalidatePath('/[locale]/dashboard', 'page');
-}
-
 async function importCsv(formData: FormData) {
   'use server';
 
@@ -102,14 +88,22 @@ export default async function OrdersPage({
     source?: string;
     city?: string;
     page?: string;
+    limit?: string;
+    dateFrom?: string;
+    dateTo?: string;
+    confirmationStatus?: string;
+    deliveryStatus?: string;
+    missingCost?: string;
   }>;
 }) {
   const { locale } = await params;
   const filters = await searchParams;
+  const manualWorkflowsEnabled = process.env.ENABLE_MANUAL_ORDER_WORKFLOWS === 'true';
+  const pageSize = ['25', '50', '100'].includes(filters.limit ?? '') ? String(filters.limit) : '25';
   const t = await getTranslations('orders');
   const query = new URLSearchParams({
     page: filters.page ?? '1',
-    limit: '25',
+    limit: pageSize,
   });
   const summaryQuery = new URLSearchParams();
   if (filters.search) query.set('search', filters.search);
@@ -126,6 +120,19 @@ export default async function OrdersPage({
     query.set('city', filters.city);
     summaryQuery.set('city', filters.city);
   }
+  for (const key of [
+    'dateFrom',
+    'dateTo',
+    'confirmationStatus',
+    'deliveryStatus',
+    'missingCost',
+  ] as const) {
+    const value = filters[key];
+    if (value && value !== 'all') {
+      query.set(key, value);
+      summaryQuery.set(key, value);
+    }
+  }
 
   const [orders, summary, workspace] = await Promise.all([
     apiFetch<OrdersResponse>(`/api/v1/orders?${query.toString()}`),
@@ -135,6 +142,11 @@ export default async function OrdersPage({
   const counts = summary.statusCounts;
   const shopifyOrders = summary.shopifyOrderCount;
   const missingCosts = summary.missingCostCount;
+  const pageHref = (page: number) => {
+    const next = new URLSearchParams(query);
+    next.set('page', String(Math.min(Math.max(page, 1), orders.totalPages)));
+    return `/${locale}/orders?${next.toString()}`;
+  };
 
   return (
     <div className="page-stack">
@@ -143,11 +155,13 @@ export default async function OrdersPage({
         title={t('title')}
         description="Track every order from the moment it arrives until it is confirmed, packed, shipped, and delivered."
         actions={
-          <>
-            <Link className="button button-primary" href={`/${locale}/orders/new`}>
-              {t('new')}
-            </Link>
-          </>
+          manualWorkflowsEnabled ? (
+            <>
+              <Link className="button button-primary" href={`/${locale}/orders/new`}>
+                {t('new')}
+              </Link>
+            </>
+          ) : undefined
         }
       />
 
@@ -240,8 +254,8 @@ export default async function OrdersPage({
           >
             <option value="all">All sources</option>
             <option value="shopify">Shopify</option>
-            <option value="manual">Manual</option>
-            <option value="csv">CSV</option>
+            {manualWorkflowsEnabled ? <option value="manual">Manual</option> : null}
+            {manualWorkflowsEnabled ? <option value="csv">CSV</option> : null}
           </select>
           <input
             className="field"
@@ -250,39 +264,102 @@ export default async function OrdersPage({
             defaultValue={filters.city ?? ''}
             placeholder="City"
           />
+          <select
+            className="select-field"
+            aria-label="Filter by confirmation status"
+            name="confirmationStatus"
+            defaultValue={filters.confirmationStatus ?? 'all'}
+          >
+            <option value="all">All confirmation states</option>
+            <option value="PENDING">Awaiting confirmation</option>
+            <option value="CONFIRMED">Confirmed in Shopy</option>
+            <option value="UNREACHABLE">Unreachable</option>
+            <option value="CALL_LATER">Call later</option>
+            <option value="REFUSED">Refused</option>
+          </select>
+          <select
+            className="select-field"
+            aria-label="Filter by delivery status"
+            name="deliveryStatus"
+            defaultValue={filters.deliveryStatus ?? 'all'}
+          >
+            <option value="all">All delivery states</option>
+            <option value="PENDING_PICKUP">Pending pickup</option>
+            <option value="IN_TRANSIT">In transit</option>
+            <option value="DELIVERED">Delivered</option>
+            <option value="RETURNED">Returned</option>
+          </select>
+          <select
+            className="select-field"
+            aria-label="Filter by cost coverage"
+            name="missingCost"
+            defaultValue={filters.missingCost ?? 'all'}
+          >
+            <option value="all">All cost states</option>
+            <option value="true">Cost missing</option>
+            <option value="false">Cost complete</option>
+          </select>
+          <input
+            className="field"
+            aria-label="From date"
+            name="dateFrom"
+            type="date"
+            defaultValue={filters.dateFrom ?? ''}
+          />
+          <input
+            className="field"
+            aria-label="To date"
+            name="dateTo"
+            type="date"
+            defaultValue={filters.dateTo ?? ''}
+          />
+          <select
+            className="select-field"
+            aria-label="Page size"
+            name="limit"
+            defaultValue={pageSize}
+          >
+            <option value="25">25 per page</option>
+            <option value="50">50 per page</option>
+            <option value="100">100 per page</option>
+          </select>
         </div>
         <button className="button button-secondary" type="submit">
           Apply
         </button>
       </form>
 
-      <form action={importCsv} className="card card-padded form-grid">
-        <label className="form-field" style={{ gridColumn: '1 / -1' }}>
-          <span>CSV import</span>
-          <textarea
-            className="field textarea-field"
-            name="csv"
-            placeholder={`customer,phone,city,address,sku,product,quantity,price,currency (${workspace.baseCurrency})`}
-            rows={4}
-            required
-          />
-        </label>
-        <div className="form-actions">
-          <button className="button button-secondary" type="submit">
-            Import CSV
-          </button>
-        </div>
-      </form>
+      {manualWorkflowsEnabled ? (
+        <form action={importCsv} className="card card-padded form-grid">
+          <label className="form-field" style={{ gridColumn: '1 / -1' }}>
+            <span>CSV import</span>
+            <textarea
+              className="field textarea-field"
+              name="csv"
+              placeholder={`customer,phone,city,address,sku,product,quantity,price,currency (${workspace.baseCurrency})`}
+              rows={4}
+              required
+            />
+          </label>
+          <div className="form-actions">
+            <button className="button button-secondary" type="submit">
+              Import CSV
+            </button>
+          </div>
+        </form>
+      ) : null}
 
       {orders.data.length === 0 ? (
         <EmptyState
           icon="OR"
-          title="No orders yet"
-          description="Orders will appear here after you create an order manually or import records. The table will show customer, phone, city, status, and next action."
+          title="No Shopify orders synced yet"
+          description="Connect Shopify and run a read-only sync to bring orders into this workspace."
           action={
-            <Link className="button button-primary" href={`/${locale}/orders/new`}>
-              Create order
-            </Link>
+            manualWorkflowsEnabled ? (
+              <Link className="button button-primary" href={`/${locale}/orders/new`}>
+                Create order
+              </Link>
+            ) : undefined
           }
         />
       ) : (
@@ -298,7 +375,6 @@ export default async function OrdersPage({
                 <th>Total</th>
                 <th>Margin</th>
                 <th>Status</th>
-                <th>Update</th>
               </tr>
             </thead>
             <tbody>
@@ -340,32 +416,53 @@ export default async function OrdersPage({
                     )}
                   </td>
                   <td>
-                    <StatusBadge tone="muted">{order.status}</StatusBadge>
-                  </td>
-                  <td>
-                    <form action={updateStatus} className="inline-form">
-                      <input name="id" type="hidden" value={order.id} />
-                      <select
-                        className="select-field"
-                        name="status"
-                        defaultValue={order.status}
-                        aria-label={`Update ${order.orderNumber} status`}
-                      >
-                        {STATUSES.map((status) => (
-                          <option key={status} value={status}>
-                            {status}
-                          </option>
-                        ))}
-                      </select>
-                      <button className="button button-secondary" type="submit">
-                        Save
-                      </button>
-                    </form>
+                    <StatusBadge tone="muted">
+                      {order.status === 'PENDING' ? 'ORDERED' : order.status}
+                    </StatusBadge>
                   </td>
                 </tr>
               ))}
             </tbody>
           </table>
+          <nav className="pagination-bar" aria-label="Orders pagination">
+            <span>
+              Showing {(orders.page - 1) * orders.limit + 1}–
+              {Math.min(orders.page * orders.limit, orders.total)} of {orders.total} orders
+            </span>
+            <div className="button-row">
+              <Link
+                className="button button-secondary"
+                aria-disabled={orders.page === 1}
+                href={pageHref(1)}
+              >
+                First
+              </Link>
+              <Link
+                className="button button-secondary"
+                aria-disabled={orders.page === 1}
+                href={pageHref(orders.page - 1)}
+              >
+                Previous
+              </Link>
+              <span>
+                Page {orders.page} of {orders.totalPages}
+              </span>
+              <Link
+                className="button button-secondary"
+                aria-disabled={orders.page === orders.totalPages}
+                href={pageHref(orders.page + 1)}
+              >
+                Next
+              </Link>
+              <Link
+                className="button button-secondary"
+                aria-disabled={orders.page === orders.totalPages}
+                href={pageHref(orders.totalPages)}
+              >
+                Last
+              </Link>
+            </div>
+          </nav>
         </div>
       )}
     </div>

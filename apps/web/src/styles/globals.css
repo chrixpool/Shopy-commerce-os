@@ -1092,6 +1092,29 @@ a {
   background: var(--surface);
 }
 
+.pagination-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 14px 16px;
+  border-top: 1px solid var(--border);
+  color: var(--text-muted);
+  font-size: 0.875rem;
+}
+
+.pagination-bar [aria-disabled='true'] {
+  pointer-events: none;
+  opacity: 0.45;
+}
+
+@media (max-width: 720px) {
+  .pagination-bar {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+}
+
 .command-grid {
   display: grid;
   grid-template-columns: minmax(0, 1.45fr) minmax(320px, 0.8fr);

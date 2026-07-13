@@ -2,6 +2,7 @@ import {
   Body,
   Controller,
   Delete,
+  ForbiddenException,
   Get,
   Param,
   Patch,
@@ -10,7 +11,7 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import { ApiOperation, ApiTags } from '@nestjs/swagger';
-import type { OrderStatus } from '@prisma/client';
+import type { ConfirmationStatus, DeliveryStatus, OrderStatus } from '@prisma/client';
 import { CurrentUser, InternalAuthGuard, type SessionUser } from '../../core/auth';
 import { CreateOrderDto } from './dto/create-order.dto';
 import { ImportOrdersCsvDto } from './dto/import-orders-csv.dto';
@@ -33,6 +34,9 @@ export class OrdersController {
     @Query('city') city?: string,
     @Query('dateFrom') dateFrom?: string,
     @Query('dateTo') dateTo?: string,
+    @Query('confirmationStatus') confirmationStatus?: ConfirmationStatus | 'all',
+    @Query('deliveryStatus') deliveryStatus?: DeliveryStatus | 'all',
+    @Query('missingCost') missingCost?: 'true' | 'false',
     @Query('page') page?: string,
     @Query('limit') limit?: string,
   ) {
@@ -43,6 +47,9 @@ export class OrdersController {
       city,
       dateFrom,
       dateTo,
+      confirmationStatus,
+      deliveryStatus,
+      missingCost,
       page: page ? Number(page) : undefined,
       limit: limit ? Number(limit) : undefined,
     });
@@ -58,6 +65,9 @@ export class OrdersController {
     @Query('city') city?: string,
     @Query('dateFrom') dateFrom?: string,
     @Query('dateTo') dateTo?: string,
+    @Query('confirmationStatus') confirmationStatus?: ConfirmationStatus | 'all',
+    @Query('deliveryStatus') deliveryStatus?: DeliveryStatus | 'all',
+    @Query('missingCost') missingCost?: 'true' | 'false',
   ) {
     return this.ordersService.summary(user.organizationId, {
       search,
@@ -66,7 +76,20 @@ export class OrdersController {
       city,
       dateFrom,
       dateTo,
+      confirmationStatus,
+      deliveryStatus,
+      missingCost,
     });
+  }
+
+  @Get('activity')
+  @ApiOperation({ summary: 'List organization-scoped business activity' })
+  activity(
+    @CurrentUser() user: SessionUser,
+    @Query('action') action?: string,
+    @Query('source') source?: string,
+  ) {
+    return this.ordersService.activity(user.organizationId, { action, source });
   }
 
   @Get(':id/timeline')
@@ -84,12 +107,14 @@ export class OrdersController {
   @Post()
   @ApiOperation({ summary: 'Create a manual organization order' })
   create(@CurrentUser() user: SessionUser, @Body() dto: CreateOrderDto) {
+    assertManualWorkflowsEnabled();
     return this.ordersService.create(user.organizationId, user.id, dto);
   }
 
   @Post('import-csv')
   @ApiOperation({ summary: 'Import manual orders from CSV text' })
   importCsv(@CurrentUser() user: SessionUser, @Body() dto: ImportOrdersCsvDto) {
+    assertManualWorkflowsEnabled();
     return this.ordersService.importCsv(user.organizationId, user.id, dto.csv);
   }
 
@@ -117,5 +142,11 @@ export class OrdersController {
   @ApiOperation({ summary: 'Delete an isolated smoke-test order' })
   deleteSmoke(@CurrentUser() user: SessionUser, @Param('id') id: string) {
     return this.ordersService.deleteSmokeOrder(user.organizationId, id);
+  }
+}
+
+function assertManualWorkflowsEnabled() {
+  if (process.env.ENABLE_MANUAL_ORDER_WORKFLOWS !== 'true') {
+    throw new ForbiddenException('Manual order workflows are disabled for this workspace');
   }
 }

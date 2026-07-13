@@ -122,6 +122,16 @@ const integrationsSource = fs.readFileSync(
   new URL('../apps/api/src/modules/integrations/integrations.service.ts', import.meta.url),
   'utf8',
 );
+assert.equal(
+  integrationsSource.includes('status: mapShopifyOrderStatus(order)'),
+  false,
+  'Shopify provider status must not set Shopy lifecycle status',
+);
+assert.equal(
+  integrationsSource.includes('status: OrderStatus.PENDING'),
+  true,
+  'New Shopify orders must start pending confirmation',
+);
 const startSyncAllSource = integrationsSource.slice(
   integrationsSource.indexOf('async startSyncAll'),
   integrationsSource.indexOf('async executeSyncAll'),
@@ -131,6 +141,19 @@ assert.ok(
     startSyncAllSource.indexOf('this.prisma.automationRun.findFirst'),
   'Sync All must recover stale runs before duplicate-run detection',
 );
+
+const resetSource = fs.readFileSync(
+  new URL('../scripts/reset-order-truth.mjs', import.meta.url),
+  'utf8',
+);
+for (const safetyGate of [
+  'CONFIRM_ORDER_TRUTH_RESET',
+  'NEON_RECOVERY_BRANCH_CONFIRMED',
+  "source: 'shopify'",
+  'userId: null',
+]) {
+  assert.equal(resetSource.includes(safetyGate), true, `Missing reset safety gate: ${safetyGate}`);
+}
 
 console.log(
   'Business readiness tests passed: RBAC, secret gate, transitions, reconciliation, encryption, Mes Colis status coverage, Sync All recovery and no-write guarantee.',

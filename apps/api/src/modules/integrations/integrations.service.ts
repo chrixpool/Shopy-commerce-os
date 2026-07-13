@@ -1342,7 +1342,9 @@ export class IntegrationsService implements OnModuleInit {
         customerId: savedCustomer?.id,
         customerName,
         customerPhone,
-        status: mapShopifyOrderStatus(order),
+        providerStatus: shopifyProviderStatus(order),
+        financialStatus: order.financial_status ?? null,
+        fulfillmentStatus: order.fulfillment_status ?? null,
         totalAmount: decimalFromString(order.total_price, 0),
         shippingCost: decimalFromString(order.total_shipping_price_set?.shop_money?.amount, 0),
         shippingAddress: {
@@ -1361,7 +1363,6 @@ export class IntegrationsService implements OnModuleInit {
               .filter(Boolean)
           : [],
       };
-      const confirmationStatus = shopifyConfirmationStatus(orderData.status);
       const itemCreates = await Promise.all(
         lineItems.map(async (item) => {
           const product = await findShopifyProductForLineItem(this.prisma, organizationId, item);
@@ -1388,12 +1389,6 @@ export class IntegrationsService implements OnModuleInit {
               deleteMany: {},
               create: itemCreates,
             },
-            confirmationTask: {
-              upsert: {
-                update: { status: confirmationStatus },
-                create: { status: confirmationStatus },
-              },
-            },
           },
         });
         stats.orders.updated += 1;
@@ -1403,6 +1398,7 @@ export class IntegrationsService implements OnModuleInit {
             organizationId,
             externalId: `shopify-order-${order.id}`,
             ...orderData,
+            status: OrderStatus.PENDING,
             items: {
               create: itemCreates,
             },
@@ -1413,7 +1409,7 @@ export class IntegrationsService implements OnModuleInit {
                 data: { provider: 'SHOPIFY', externalId: String(order.id) },
               },
             },
-            confirmationTask: { create: { status: confirmationStatus } },
+            confirmationTask: { create: { status: ConfirmationStatus.PENDING } },
           },
         });
         stats.orders.created += 1;
@@ -2146,29 +2142,11 @@ function decimalFromString(value: unknown, fallback: number) {
   return Number.isFinite(parsed) ? parsed : fallback;
 }
 
-function mapShopifyOrderStatus(order: ShopifyOrder) {
-  if (order.cancelled_at) return OrderStatus.CANCELLED;
-  if (order.fulfillment_status === 'fulfilled') return OrderStatus.SHIPPED;
-  if (order.financial_status === 'paid' || order.confirmed) return OrderStatus.CONFIRMED;
-  return OrderStatus.PENDING;
-}
-
-function shopifyConfirmationStatus(status: OrderStatus) {
-  if (
-    status === OrderStatus.CONFIRMED ||
-    status === OrderStatus.SHIPPED ||
-    status === OrderStatus.DELIVERED
-  ) {
-    return ConfirmationStatus.CONFIRMED;
-  }
-  if (
-    status === OrderStatus.CANCELLED ||
-    status === OrderStatus.REFUSED ||
-    status === OrderStatus.RETURNED
-  ) {
-    return ConfirmationStatus.REFUSED;
-  }
-  return ConfirmationStatus.PENDING;
+function shopifyProviderStatus(order: ShopifyOrder) {
+  if (order.cancelled_at) return 'cancelled';
+  if (order.fulfillment_status) return String(order.fulfillment_status);
+  if (order.financial_status) return String(order.financial_status);
+  return order.confirmed ? 'confirmed' : 'open';
 }
 
 function integrationFailureMessage(error: unknown) {

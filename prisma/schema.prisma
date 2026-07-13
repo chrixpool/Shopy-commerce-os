@@ -331,6 +331,9 @@ model Order {
   externalId    String? // Shopify order ID
   orderNumber   String  // Human readable: #1001
   source        String  @default("manual") // shopify | manual | etc.
+  providerStatus     String?
+  financialStatus    String?
+  fulfillmentStatus  String?
 
   customerId    String?
   customer      Customer? @relation(fields: [customerId], references: [id])

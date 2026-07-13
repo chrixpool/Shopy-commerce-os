@@ -19,6 +19,6 @@ export class FulfillmentController {
     @Param('id') id: string,
     @Body() dto: UpdateFulfillmentDto,
   ) {
-    return this.workflowsService.updateFulfillment(user.organizationId, user.id, id, dto.status);
+    return this.workflowsService.updateFulfillment(user.organizationId, user, id, dto.status);
   }
 }

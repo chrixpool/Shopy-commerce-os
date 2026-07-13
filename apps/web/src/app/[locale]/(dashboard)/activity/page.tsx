@@ -2,24 +2,14 @@ import Link from 'next/link';
 import { EmptyState, MetricCard, PageHeader, StatusBadge, SurfaceCard } from '@/components/ui/page';
 import { apiFetch } from '@/lib/api';
 
-interface OrderRecord {
+interface BusinessActivity {
   id: string;
-  orderNumber: string;
-  customerName: string;
-  status: string;
-  source?: string | null;
-  createdAt: string;
-}
-
-interface OrdersResponse {
-  data: OrderRecord[];
-}
-
-interface DraftAction {
-  id: string;
-  title: string;
-  status: string;
-  provider: string;
+  action: string;
+  note?: string | null;
+  source: string;
+  actor: string;
+  actorRole?: string | null;
+  entityReference: string;
   createdAt: string;
 }
 
@@ -27,7 +17,6 @@ interface AutomationRun {
   id: string;
   status: string;
   startedAt: string;
-  finishedAt?: string | null;
   dryRun?: boolean;
   errorMessage?: string | null;
 }
@@ -49,45 +38,36 @@ function formatDate(value: string, locale: string) {
 
 export default async function ActivityPage({ params }: { params: Promise<{ locale: string }> }) {
   const { locale } = await params;
-  const [orders, automationRuns, draftActions, shopifyRuns] = await Promise.all([
-    optionalApiFetch<OrdersResponse>('/api/v1/orders?limit=8', { data: [] }),
+  const [businessActivity, automationRuns, shopifyRuns] = await Promise.all([
+    optionalApiFetch<BusinessActivity[]>('/api/v1/orders/activity', []),
     optionalApiFetch<AutomationRun[]>('/api/v1/automations/runs', []),
-    optionalApiFetch<DraftAction[]>('/api/v1/draft-actions', []),
     optionalApiFetch<AutomationRun[]>('/api/v1/integrations/shopify/sync-runs', []),
   ]);
 
   const timeline = [
-    ...orders.data.map((order) => ({
-      id: `order-${order.id}`,
-      type: 'Order',
-      title: order.orderNumber,
-      description: `${order.customerName} · ${order.status} · ${order.source ?? 'manual'}`,
-      at: order.createdAt,
-      tone: order.source === 'shopify' ? 'info' : 'muted',
+    ...businessActivity.map((event) => ({
+      id: `event-${event.id}`,
+      type: event.source.replaceAll('_', ' '),
+      title: `${event.entityReference} - ${event.action.replaceAll('_', ' ')}`,
+      description: `${event.actor}${event.actorRole ? ` (${event.actorRole})` : ''}${event.note ? ` - ${event.note}` : ''}`,
+      at: event.createdAt,
+      tone: event.source === 'USER' ? 'success' : event.source === 'SYSTEM' ? 'muted' : 'info',
     })),
-    ...automationRuns.slice(0, 8).map((run) => ({
+    ...automationRuns.slice(0, 12).map((run) => ({
       id: `automation-${run.id}`,
-      type: 'Automation',
+      type: 'AUTOMATION',
       title: run.dryRun ? 'Dry-run automation' : 'Automation run',
-      description: run.errorMessage ?? run.status.replaceAll('_', ' ').toLowerCase(),
+      description: `System - ${run.errorMessage ?? run.status.replaceAll('_', ' ').toLowerCase()}`,
       at: run.startedAt,
       tone: run.status === 'SUCCESS' ? 'success' : run.errorMessage ? 'warning' : 'info',
     })),
-    ...shopifyRuns.slice(0, 8).map((run) => ({
+    ...shopifyRuns.slice(0, 12).map((run) => ({
       id: `shopify-${run.id}`,
-      type: 'Shopify',
+      type: 'SHOPIFY',
       title: run.dryRun ? 'Shopify dry-run sync' : 'Shopify sync',
-      description: run.errorMessage ?? run.status.replaceAll('_', ' ').toLowerCase(),
+      description: `Shopify - ${run.errorMessage ?? run.status.replaceAll('_', ' ').toLowerCase()}`,
       at: run.startedAt,
       tone: run.status === 'SUCCESS' ? 'success' : run.errorMessage ? 'warning' : 'info',
-    })),
-    ...draftActions.slice(0, 8).map((action) => ({
-      id: `draft-${action.id}`,
-      type: 'Draft action',
-      title: action.title,
-      description: `${action.provider.replaceAll('_', ' ')} · ${action.status}`,
-      at: action.createdAt,
-      tone: action.status === 'APPROVED' ? 'success' : 'warning',
     })),
   ].sort((a, b) => new Date(b.at).getTime() - new Date(a.at).getTime());
 
@@ -96,7 +76,7 @@ export default async function ActivityPage({ params }: { params: Promise<{ local
       <PageHeader
         eyebrow="Control room"
         title="Activity"
-        description="Review recent order movement, automation runs, draft actions, and Shopify sync activity without exposing provider payloads."
+        description="Review business actions with their actor and source. Legacy events without an actor are identified clearly."
         actions={
           <Link className="button button-primary" href={`/${locale}/dashboard`} prefetch>
             Back to dashboard
@@ -106,31 +86,24 @@ export default async function ActivityPage({ params }: { params: Promise<{ local
 
       <section className="stats-grid" aria-label="Activity summary">
         <MetricCard
-          label="Recent orders"
-          value={String(orders.data.length)}
-          help="Latest order records visible in the activity stream."
-          badge="Orders"
+          label="Business events"
+          value={String(businessActivity.length)}
+          help="Recent organization-scoped actions with actor identity."
+          badge="Audit"
           badgeTone="info"
         />
         <MetricCard
           label="Automation runs"
           value={String(automationRuns.length)}
-          help="Recent dry-run or manual automation executions."
-          badge="Safe"
-          badgeTone="success"
-        />
-        <MetricCard
-          label="Draft actions"
-          value={String(draftActions.length)}
-          help="Actions waiting for review before anything external happens."
-          badge="Approval"
-          badgeTone={draftActions.length ? 'warning' : 'success'}
+          help="Recent internal automation execution records."
+          badge="System"
+          badgeTone="muted"
         />
         <MetricCard
           label="Shopify sync runs"
           value={String(shopifyRuns.length)}
-          help="Read-only Shopify import activity."
-          badge="Read-only"
+          help="Read-only provider synchronization activity."
+          badge="Shopify"
           badgeTone="info"
         />
       </section>
@@ -138,7 +111,7 @@ export default async function ActivityPage({ params }: { params: Promise<{ local
       <SurfaceCard>
         {timeline.length ? (
           <div className="activity-list">
-            {timeline.slice(0, 24).map((item) => (
+            {timeline.slice(0, 100).map((item) => (
               <div className="activity-item" key={item.id}>
                 <div>
                   <p className="activity-title">{item.title}</p>
@@ -154,8 +127,8 @@ export default async function ActivityPage({ params }: { params: Promise<{ local
         ) : (
           <EmptyState
             icon="AC"
-            title="No activity recorded yet"
-            description="Create orders, run a Shopify dry-run, or test an automation to populate the activity stream."
+            title="No business activity recorded yet"
+            description="Shopy will record confirmation, fulfillment, costing, integration, and provider actions here."
           />
         )}
       </SurfaceCard>

@@ -33,6 +33,9 @@ async function createOrder(formData: FormData) {
 
 export default async function NewOrderPage({ params }: { params: Promise<{ locale: string }> }) {
   const { locale } = await params;
+  if (process.env.ENABLE_MANUAL_ORDER_WORKFLOWS !== 'true') {
+    redirect(`/${locale}/orders`);
+  }
   const workspace = await getWorkspaceSettings();
 
   return (
