@@ -49,10 +49,7 @@ export class DashboardService {
         _count: { _all: true },
       }),
       this.prisma.order.aggregate({
-        where: {
-          ...orderWhere,
-          status: { in: ['CONFIRMED', 'SHIPPED', 'DELIVERED'] },
-        },
+        where: orderWhere,
         _sum: { totalAmount: true },
       }),
       this.prisma.order.aggregate({ where: orderWhere, _sum: { totalAmount: true } }),
@@ -106,10 +103,7 @@ export class DashboardService {
       }),
       this.prisma.order.count({ where: previousOrderWhere }),
       this.prisma.order.aggregate({
-        where: {
-          ...previousOrderWhere,
-          status: { in: ['CONFIRMED', 'SHIPPED', 'DELIVERED'] },
-        },
+        where: previousOrderWhere,
         _sum: { totalAmount: true },
       }),
     ]);

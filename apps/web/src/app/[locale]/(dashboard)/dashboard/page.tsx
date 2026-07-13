@@ -355,11 +355,11 @@ export default async function DashboardPage({
           href={`/${locale}/inventory`}
         />
         <MetricCard
-          label="Revenue tracked"
+          label="Imported order value"
           value={
             criticalUnavailable ? '—' : formatMoney(summary.revenue, workspace.baseCurrency, locale)
           }
-          help="Revenue from confirmed, shipped, and delivered orders."
+          help="Total value across imported orders in the selected period."
           badge="DB"
           badgeTone="muted"
           href={`/${locale}/finance`}
