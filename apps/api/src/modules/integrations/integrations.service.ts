@@ -68,6 +68,10 @@ export class IntegrationsService implements OnModuleInit {
   ) {}
 
   async onModuleInit() {
+    await this.recoverStaleSyncAllRuns();
+  }
+
+  private async recoverStaleSyncAllRuns() {
     const staleBefore = new Date(Date.now() - 10 * 60_000);
     await this.prisma.$transaction([
       this.prisma.automationRun.updateMany({
@@ -184,6 +188,9 @@ export class IntegrationsService implements OnModuleInit {
   }
 
   async startSyncAll(organizationId: string, userId: string) {
+    // Free-tier instances can stop after accepting a run. Recover stale state
+    // before duplicate detection so an interrupted run cannot block the next one.
+    await this.recoverStaleSyncAllRuns();
     const active = await this.prisma.automationRun.findFirst({
       where: {
         organizationId,

@@ -95,6 +95,20 @@ for (const forbidden of ['/orders/Create', '/orders/DeleteOrder', '/sub_accounts
 const mainSource = fs.readFileSync(new URL('../apps/api/src/main.ts', import.meta.url), 'utf8');
 assert.equal(mainSource.includes('API_INTERNAL_SECRET is required in production'), true);
 
+const integrationsSource = fs.readFileSync(
+  new URL('../apps/api/src/modules/integrations/integrations.service.ts', import.meta.url),
+  'utf8',
+);
+const startSyncAllSource = integrationsSource.slice(
+  integrationsSource.indexOf('async startSyncAll'),
+  integrationsSource.indexOf('async executeSyncAll'),
+);
+assert.ok(
+  startSyncAllSource.indexOf('await this.recoverStaleSyncAllRuns()') <
+    startSyncAllSource.indexOf('this.prisma.automationRun.findFirst'),
+  'Sync All must recover stale runs before duplicate-run detection',
+);
+
 console.log(
-  'Business readiness tests passed: RBAC, secret gate, transitions, reconciliation, encryption, Mes Colis status coverage and no-write guarantee.',
+  'Business readiness tests passed: RBAC, secret gate, transitions, reconciliation, encryption, Mes Colis status coverage, Sync All recovery and no-write guarantee.',
 );
