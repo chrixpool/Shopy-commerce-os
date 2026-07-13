@@ -15,7 +15,7 @@ export default function AuthLayout({ children }: { children: React.ReactNode }) 
         </p>
         <div className="auth-proof-grid">
           <span>Database-backed workflows</span>
-          <span>Manual-first operations</span>
+          <span>Operator-controlled workflows</span>
           <span>Currency-aware workspace</span>
         </div>
       </div>

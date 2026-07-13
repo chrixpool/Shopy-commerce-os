@@ -282,7 +282,7 @@ export default async function DashboardPage({
         actions={
           <>
             <Link className="button button-primary" href={`/${locale}/orders`} prefetch>
-              Add or import orders
+              Review connected orders
             </Link>
           </>
         }

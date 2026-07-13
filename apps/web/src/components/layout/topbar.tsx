@@ -30,7 +30,7 @@ const TITLES: Record<string, string> = {
 
 const SUBTITLES: Record<string, string> = {
   dashboard: "Command center for today's commerce work.",
-  orders: 'Create, import, and move orders through operations.',
+  orders: 'Review and move connected orders through operations.',
   confirmation: 'Prioritize customer follow-ups and confirmation outcomes.',
   fulfillment: 'Track packing work and inventory readiness.',
   delivery: 'Monitor parcels, failures, and final delivery status.',

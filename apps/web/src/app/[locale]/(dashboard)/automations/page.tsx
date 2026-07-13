@@ -185,7 +185,7 @@ export default async function AutomationsPage() {
             <label className="form-field">
               <span>Provider</span>
               <select className="select-field" name="provider" defaultValue="MANUAL">
-                <option value="MANUAL">Manual workflows</option>
+                <option value="MANUAL">Shopy internal rules</option>
                 <option value="SHOPIFY">Shopify</option>
                 <option value="META_ADS">Meta Ads</option>
                 <option value="FACEBOOK_PAGE">Facebook Page</option>

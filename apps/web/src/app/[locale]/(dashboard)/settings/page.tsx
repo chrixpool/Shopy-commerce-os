@@ -106,8 +106,6 @@ interface WorkflowReconciliation {
 }
 
 const FALLBACK_INTEGRATIONS: Integration[] = [
-  { provider: 'CSV', label: 'CSV import', status: 'CONNECTED', mode: 'READ_ONLY' },
-  { provider: 'MANUAL', label: 'Manual workflows', status: 'CONNECTED', mode: 'APPROVAL_REQUIRED' },
   { provider: 'SHOPIFY', label: 'Shopify', status: 'DISCONNECTED', mode: 'READ_ONLY' },
   { provider: 'META_ADS', label: 'Meta Ads', status: 'DISCONNECTED', mode: 'READ_ONLY' },
   {
@@ -342,7 +340,7 @@ export default async function SettingsPage({ params }: { params: Promise<{ local
           label="Integrations"
           value={String(connectedCount)}
           help="Connected provider and system channels."
-          badge={connectedCount ? 'Channels on' : 'Manual-first'}
+          badge={connectedCount ? 'Channels on' : 'Connect a channel'}
           badgeTone={connectedCount ? 'success' : 'muted'}
         />
       </section>
