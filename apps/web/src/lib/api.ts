@@ -140,7 +140,12 @@ async function safeApiErrorMessage(response: Response) {
     const payload = (await response.json()) as { message?: unknown };
     const message = Array.isArray(payload.message) ? payload.message[0] : payload.message;
     if (typeof message !== 'string' || !message.trim() || message.length > 240) return null;
-    if (/token|secret|password|credential|authorization|cookie/i.test(message)) return null;
+    if (
+      /bearer\s+\S+/i.test(message) ||
+      /(?:token|secret|password|credential|authorization|cookie)\s*[:=]\s*\S+/i.test(message)
+    ) {
+      return null;
+    }
     return message.trim();
   } catch {
     return null;
