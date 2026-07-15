@@ -486,15 +486,10 @@ export class MesColisService implements OnModuleInit, OnModuleDestroy {
     context: { orderReference?: string; source: 'poll' | 'socket' },
   ) {
     const barcode = cleanBarcode(payload.barcode);
-    const providerStatus = normalizeRawStatus(payload.status);
+    const providerStatus = mesColisProviderStatus(payload);
     const normalizedStatus = normalizeMesColisStatus(providerStatus);
     const details = safeDetails(payload);
-    const occurredAt = parseDate(payload.updated_at) ?? new Date();
-    const eventHash = createHash('sha256')
-      .update(
-        JSON.stringify({ barcode, providerStatus, occurredAt: occurredAt.toISOString(), details }),
-      )
-      .digest('hex');
+    const providerUpdatedAt = parseDate(payload.updated_at) ?? parseDate(payload.created_at);
     const match = await this.matchOrder(organizationId, barcode, context.orderReference);
     const existing = await this.prisma.providerParcel.findUnique({
       where: {
@@ -505,6 +500,13 @@ export class MesColisService implements OnModuleInit, OnModuleDestroy {
         },
       },
     });
+    const occurredAt = providerUpdatedAt ?? existing?.lastProviderUpdateAt ?? new Date();
+    const eventHash = mesColisEventHash(
+      barcode,
+      providerStatus,
+      providerUpdatedAt?.toISOString() ?? null,
+      details,
+    );
     const providerParcel = await this.prisma.providerParcel.upsert({
       where: {
         organizationId_provider_barcode: {
@@ -659,7 +661,9 @@ export class MesColisService implements OnModuleInit, OnModuleDestroy {
       const response = await fetch(`${MES_COLIS_API()}/orders/GetOrder`, {
         method: 'POST',
         headers: { 'content-type': 'application/json', 'x-access-token': token },
-        body: JSON.stringify({ barcode: '9999999999999' }),
+        // BARCODE_REQUIRED is a documented authenticated response and avoids
+        // probing an invented parcel that can trigger provider-side 500s.
+        body: JSON.stringify({}),
         signal: AbortSignal.timeout(12_000),
       });
       const body = await safeJson(response);
@@ -678,7 +682,7 @@ export class MesColisService implements OnModuleInit, OnModuleDestroy {
 
   private async getOrder(token: string, barcode: string) {
     try {
-      const response = await fetch(`${MES_COLIS_API()}/orders/GetOrder`, {
+      const response = await fetch(`${MES_COLIS_API()}/orders/GetOrderDetails`, {
         method: 'POST',
         headers: { 'content-type': 'application/json', 'x-access-token': token },
         body: JSON.stringify({ barcode }),
@@ -690,9 +694,11 @@ export class MesColisService implements OnModuleInit, OnModuleDestroy {
         if (code.includes('ORDER_NOT_FOUND') || code.includes('ORDERS_NOTFOUND'))
           throw new NotFoundException('Mes Colis could not find this barcode.');
         if (
+          response.status === 501 ||
           code.includes('INVALID_TOKEN') ||
           code.includes('NO_TOKEN') ||
-          code.includes('USER_NOT_FOUND')
+          code.includes('USER_NOT_FOUND') ||
+          code.includes('CANNOT_GET_USER_BY_TOKEN')
         )
           throw new BadRequestException('Mes Colis access expired. Reconnect in Settings.');
         if (code.includes('ACCESS_DENIED'))
@@ -701,7 +707,7 @@ export class MesColisService implements OnModuleInit, OnModuleDestroy {
           'Mes Colis tracking is temporarily unavailable. Existing tracking remains visible.',
         );
       }
-      if (!body.barcode || !body.status) {
+      if (!body.barcode || (!body.status_code && !body.status)) {
         throw new ServiceUnavailableException(
           'Mes Colis returned an incomplete tracking response. Try again later.',
         );
@@ -737,6 +743,28 @@ export function normalizeMesColisStatus(value: string) {
   return STATUS_MAP[value] ?? 'NEEDS_REVIEW';
 }
 
+export function mesColisProviderStatus(payload: Record<string, unknown>) {
+  return normalizeRawStatus(payload.status_code ?? payload.status);
+}
+
+export function mesColisEventHash(
+  barcode: string,
+  providerStatus: string,
+  providerUpdatedAt: string | null,
+  details: Record<string, unknown>,
+) {
+  return createHash('sha256')
+    .update(
+      JSON.stringify({
+        barcode,
+        providerStatus,
+        providerUpdatedAt: providerUpdatedAt ?? 'provider-time-unavailable',
+        details,
+      }),
+    )
+    .digest('hex');
+}
+
 function normalizeRawStatus(value: unknown) {
   const status = String(value ?? '')
     .trim()
@@ -754,6 +782,9 @@ function cleanBarcode(value: unknown) {
 
 function safeDetails(payload: Record<string, unknown>) {
   const allowed = [
+    'status_code',
+    'status',
+    'created_at',
     'qualification',
     'motif',
     'updated_at',
@@ -845,6 +876,14 @@ export function classifyMesColisConnectionResponse(status: number, body: Record<
       message: 'Mes Colis credentials are valid.',
     };
   }
+  if (code.includes('ROLE_NOT_FOUND') || code.includes('CANNOT_GET_ROLE_EXPEDITEUR')) {
+    return {
+      ok: false,
+      verification: 'ACCOUNT_NOT_READY' as const,
+      message:
+        'Mes Colis has not enabled parcel access for this account. Contact Mes Colis support.',
+    };
+  }
   if (
     status === 501 ||
     code.includes('INVALID_TOKEN') ||
@@ -858,21 +897,22 @@ export function classifyMesColisConnectionResponse(status: number, body: Record<
       message: 'Mes Colis rejected this access token. Reconnect with a valid token.',
     };
   }
-  if (code.includes('ORDER_NOT_FOUND') || code.includes('ORDERS_NOTFOUND')) {
+  if (
+    code.includes('BARCODE_REQUIRED') ||
+    code.includes('ORDER_NOT_FOUND') ||
+    code.includes('ORDERS_NOTFOUND')
+  ) {
     return {
       ok: true,
       verification: 'VERIFIED' as const,
       message: 'Mes Colis credentials are valid.',
     };
   }
-  if (status === 403) {
-    // Mes Colis documents authentication failures as 501. A 403 from GetOrder
-    // means the token reached parcel-level authorization or validation.
+  if (code.includes('ACCESS_DENIED')) {
     return {
-      ok: true,
-      verification: 'TOKEN_ACCEPTED' as const,
-      message:
-        'Mes Colis accepted the token. Parcel access will be confirmed on the first barcode lookup.',
+      ok: false,
+      verification: 'ACCESS_DENIED' as const,
+      message: 'This Mes Colis account cannot read parcel tracking. Check account access.',
     };
   }
   return {
@@ -896,5 +936,6 @@ function providerCode(body: Record<string, unknown>) {
     .filter((value) => value != null)
     .map(String)
     .join(' ')
-    .toUpperCase();
+    .toUpperCase()
+    .replace(/[^A-Z0-9]+/g, '_');
 }

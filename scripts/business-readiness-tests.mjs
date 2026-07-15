@@ -17,6 +17,8 @@ const {
 const { reconciliationResult } = require('../apps/api/dist/modules/workflows/workflows.service.js');
 const {
   classifyMesColisConnectionResponse,
+  mesColisEventHash,
+  mesColisProviderStatus,
   MES_COLIS_STATUSES,
   normalizeMesColisStatus,
 } = require('../apps/api/dist/modules/integrations/mes-colis.service.js');
@@ -83,11 +85,32 @@ assert.deepEqual(classifyMesColisConnectionResponse(501, {}), {
   message: 'Mes Colis rejected this access token. Reconnect with a valid token.',
 });
 assert.equal(
-  classifyMesColisConnectionResponse(403, { error: 'ORDER_NOT_FOUND' }).ok,
+  classifyMesColisConnectionResponse(501, { error: 'ROLE_NOT_FOUND' }).verification,
+  'ACCOUNT_NOT_READY',
+);
+assert.equal(
+  classifyMesColisConnectionResponse(403, { error: 'BARCODE_REQUIRED' }).ok,
   true,
 );
-assert.equal(classifyMesColisConnectionResponse(403, {}).verification, 'TOKEN_ACCEPTED');
+assert.equal(
+  classifyMesColisConnectionResponse(403, { error: 'ACCESS_DENIED' }).verification,
+  'ACCESS_DENIED',
+);
+assert.equal(classifyMesColisConnectionResponse(403, {}).verification, 'UNAVAILABLE');
 assert.equal(classifyMesColisConnectionResponse(503, {}).verification, 'UNAVAILABLE');
+assert.equal(
+  mesColisProviderStatus({ status: 'En attente', status_code: 'pending' }),
+  'pending',
+);
+assert.equal(mesColisProviderStatus({ status: 'delivered' }), 'delivered');
+assert.equal(
+  mesColisEventHash('1234567890113', 'pending', null, {}),
+  mesColisEventHash('1234567890113', 'pending', null, {}),
+);
+assert.notEqual(
+  mesColisEventHash('1234567890113', 'pending', null, {}),
+  mesColisEventHash('1234567890113', 'delivered', null, {}),
+);
 
 process.env.INTEGRATION_SECRET_KEY = 'test-only-integration-key';
 const secrets = new IntegrationSecretsService();
