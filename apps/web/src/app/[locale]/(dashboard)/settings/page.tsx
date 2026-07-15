@@ -672,26 +672,51 @@ export default async function SettingsPage({ params }: { params: Promise<{ local
                   {isExternal ? (
                     <form action={testIntegration}>
                       <input name="provider" type="hidden" value={integration.provider} />
-                      <button className="button button-secondary" type="submit">
+                      <button
+                        className="button button-secondary"
+                        type="submit"
+                        disabled={integration.status !== 'CONNECTED'}
+                        title={
+                          integration.status !== 'CONNECTED'
+                            ? `Connect ${integration.label} before testing.`
+                            : undefined
+                        }
+                      >
                         Test
+                      </button>
+                    </form>
+                  ) : null}
+                  {integration.provider !== 'MES_COLIS' ? (
+                    <form action={syncIntegration}>
+                      <input name="provider" type="hidden" value={integration.provider} />
+                      <input name="dryRun" type="hidden" value="true" />
+                      <button
+                        className="button button-secondary"
+                        type="submit"
+                        disabled={isExternal && integration.status !== 'CONNECTED'}
+                      >
+                        Dry-run sync
                       </button>
                     </form>
                   ) : null}
                   <form action={syncIntegration}>
                     <input name="provider" type="hidden" value={integration.provider} />
-                    <input name="dryRun" type="hidden" value="true" />
-                    <button className="button button-secondary" type="submit">
-                      Dry-run sync
-                    </button>
-                  </form>
-                  <form action={syncIntegration}>
-                    <input name="provider" type="hidden" value={integration.provider} />
                     <input name="dryRun" type="hidden" value="false" />
-                    <button className="button button-primary" type="submit">
+                    <button
+                      className="button button-primary"
+                      type="submit"
+                      disabled={isExternal && integration.status !== 'CONNECTED'}
+                      title={
+                        isExternal && integration.status !== 'CONNECTED'
+                          ? `Connect ${integration.label} before syncing.`
+                          : undefined
+                      }
+                    >
                       Sync now
                     </button>
                   </form>
-                  {['SHOPIFY', 'MES_COLIS'].includes(integration.provider) ? (
+                  {['SHOPIFY', 'MES_COLIS'].includes(integration.provider) &&
+                  integration.status === 'CONNECTED' ? (
                     <form action={disconnectIntegration}>
                       <input name="provider" type="hidden" value={integration.provider} />
                       <button className="button button-secondary" type="submit">

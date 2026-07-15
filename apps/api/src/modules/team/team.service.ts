@@ -74,7 +74,6 @@ export class TeamService {
       id: invitation.id,
       email: invitation.email,
       role: invitation.role,
-      token: invitation.token,
       expiresAt: invitation.expiresAt,
     };
   }
@@ -86,7 +85,6 @@ export class TeamService {
         id: true,
         email: true,
         role: true,
-        token: true,
         status: true,
         expiresAt: true,
         createdAt: true,

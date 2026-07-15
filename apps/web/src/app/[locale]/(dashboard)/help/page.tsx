@@ -72,7 +72,11 @@ export default async function HelpPage({ params }: { params: Promise<{ locale: s
               <StatusBadge tone="info">{guide.badge}</StatusBadge>
             </div>
             <div className="button-row">
-              <Link className="button button-secondary" href={`/${locale}/${guide.href}`} prefetch>
+              <Link
+                className="button button-secondary"
+                href={`/${locale}/${guide.href}`}
+                prefetch={false}
+              >
                 Open workflow
               </Link>
             </div>

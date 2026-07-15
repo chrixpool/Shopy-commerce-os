@@ -14,7 +14,6 @@ interface Invitation {
   id: string;
   email: string;
   role: string;
-  token: string;
   status: string;
   expiresAt: string;
   createdAt: string;
@@ -22,22 +21,6 @@ interface Invitation {
     name?: string | null;
     email?: string | null;
   } | null;
-}
-
-const ROLES = ['ADMIN', 'CONFIRMER', 'PACKER', 'DELIVERER', 'CAMPAIGN_MANAGER', 'VIEWER'];
-
-async function inviteMember(formData: FormData) {
-  'use server';
-
-  await apiFetch('/api/v1/team/invitations', {
-    method: 'POST',
-    body: JSON.stringify({
-      email: String(formData.get('email') ?? ''),
-      role: String(formData.get('role') ?? 'VIEWER'),
-    }),
-  });
-
-  revalidatePath('/[locale]/team', 'page');
 }
 
 async function revokeInvitation(formData: FormData) {
@@ -49,8 +32,7 @@ async function revokeInvitation(formData: FormData) {
   revalidatePath('/[locale]/team', 'page');
 }
 
-export default async function TeamPage({ params }: { params: Promise<{ locale: string }> }) {
-  const { locale } = await params;
+export default async function TeamPage() {
   const [members, invitations] = await Promise.all([
     apiFetch<Member[]>('/api/v1/team/members'),
     apiFetch<Invitation[]>('/api/v1/team/invitations'),
@@ -97,27 +79,15 @@ export default async function TeamPage({ params }: { params: Promise<{ locale: s
         />
       </section>
 
-      <form action={inviteMember} className="card card-padded form-grid">
-        <label className="form-field">
-          <span>Email</span>
-          <input className="field" name="email" type="email" required />
-        </label>
-        <label className="form-field">
-          <span>Role</span>
-          <select className="select-field" name="role" defaultValue="VIEWER">
-            {ROLES.map((role) => (
-              <option key={role} value={role}>
-                {role}
-              </option>
-            ))}
-          </select>
-        </label>
-        <div className="form-actions">
-          <button className="button button-primary" type="submit">
-            Create invitation
-          </button>
+      <div className="status-banner status-banner-warning" role="status">
+        <div>
+          <strong>Invitations are temporarily paused</strong>
+          <p>
+            Secure invitation delivery is not configured yet. Existing members and roles remain
+            available, and no invitation token is exposed in the browser.
+          </p>
         </div>
-      </form>
+      </div>
 
       <div className="table-wrap">
         <table className="data-table">
@@ -160,7 +130,6 @@ export default async function TeamPage({ params }: { params: Promise<{ locale: s
                 <th>Email</th>
                 <th>Role</th>
                 <th>Status</th>
-                <th>Local invite link</th>
                 <th>Action</th>
               </tr>
             </thead>
@@ -172,9 +141,6 @@ export default async function TeamPage({ params }: { params: Promise<{ locale: s
                     <span className="badge badge-muted">{invitation.role}</span>
                   </td>
                   <td>{invitation.status}</td>
-                  <td>
-                    <code>{`/${locale}/sign-up?token=${invitation.token}`}</code>
-                  </td>
                   <td>
                     {invitation.status === 'PENDING' ? (
                       <form action={revokeInvitation}>

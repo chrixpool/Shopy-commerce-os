@@ -1,5 +1,7 @@
 'use client';
 
+import { useEffect, useState } from 'react';
+
 export default function DashboardError({
   error,
   reset,
@@ -7,6 +9,7 @@ export default function DashboardError({
   error: Error & { digest?: string };
   reset: () => void;
 }) {
+  const [retrying, setRetrying] = useState(false);
   const isAuthFailure =
     error.message.includes('session is no longer valid') ||
     error.message.includes('Not authenticated') ||
@@ -16,7 +19,22 @@ export default function DashboardError({
     error.message.includes('API request failed') ||
     error.message.includes('fetch failed') ||
     error.message.includes('ECONNREFUSED') ||
-    error.message.includes('Shopy API');
+    error.message.includes('Shopy API') ||
+    error.message.includes('workspace API is starting') ||
+    error.message.includes('workspace service could not be reached');
+
+  useEffect(() => {
+    if (!isApiFailure) return;
+    const key = `shopy-error-recovery:${window.location.pathname}`;
+    const attempts = Number(window.sessionStorage.getItem(key) ?? 0);
+    if (attempts >= 2) return;
+    const timer = window.setTimeout(() => {
+      window.sessionStorage.setItem(key, String(attempts + 1));
+      setRetrying(true);
+      window.location.reload();
+    }, 3500);
+    return () => window.clearTimeout(timer);
+  }, [isApiFailure]);
 
   return (
     <div className="page-stack">
@@ -45,8 +63,17 @@ export default function DashboardError({
                 Sign in again
               </a>
             ) : (
-              <button className="button button-primary" type="button" onClick={reset}>
-                Retry view
+              <button
+                className="button button-primary"
+                type="button"
+                disabled={retrying}
+                onClick={() => {
+                  setRetrying(true);
+                  if (isApiFailure) window.location.reload();
+                  else reset();
+                }}
+              >
+                {retrying ? 'Reconnecting...' : 'Retry view'}
               </button>
             )}
           </div>

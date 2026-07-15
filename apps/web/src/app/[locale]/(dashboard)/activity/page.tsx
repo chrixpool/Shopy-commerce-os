@@ -78,7 +78,7 @@ export default async function ActivityPage({ params }: { params: Promise<{ local
         title="Activity"
         description="Review business actions with their actor and source. Legacy events without an actor are identified clearly."
         actions={
-          <Link className="button button-primary" href={`/${locale}/dashboard`} prefetch>
+          <Link className="button button-primary" href={`/${locale}/dashboard`} prefetch={false}>
             Back to dashboard
           </Link>
         }

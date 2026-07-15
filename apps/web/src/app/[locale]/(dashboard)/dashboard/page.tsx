@@ -281,7 +281,7 @@ export default async function DashboardPage({
         description="A quick view of orders, confirmations, fulfillment, and revenue. Start here to understand what needs attention today."
         actions={
           <>
-            <Link className="button button-primary" href={`/${locale}/orders`} prefetch>
+            <Link className="button button-primary" href={`/${locale}/orders`} prefetch={false}>
               Review connected orders
             </Link>
           </>
@@ -511,31 +511,31 @@ export default async function DashboardPage({
         <SurfaceCard>
           <SectionHeader title="Quick actions" description="Move common work forward quickly." />
           <div className="quick-action-grid">
-            <Link className="quick-action" href={`/${locale}/confirmation`} prefetch>
+            <Link className="quick-action" href={`/${locale}/confirmation`} prefetch={false}>
               <span>Review calls</span>
               <small>Confirm pending orders</small>
             </Link>
-            <Link className="quick-action" href={`/${locale}/inventory`} prefetch>
+            <Link className="quick-action" href={`/${locale}/inventory`} prefetch={false}>
               <span>Stock control</span>
               <small>Check low inventory</small>
             </Link>
-            <Link className="quick-action" href={`/${locale}/factory`} prefetch>
+            <Link className="quick-action" href={`/${locale}/factory`} prefetch={false}>
               <span>Factory costs</span>
               <small>Calculate margins</small>
             </Link>
-            <Link className="quick-action" href={`/${locale}/automations`} prefetch>
+            <Link className="quick-action" href={`/${locale}/automations`} prefetch={false}>
               <span>Automation rules</span>
               <small>Run dry-run workflows</small>
             </Link>
-            <Link className="quick-action" href={`/${locale}/activity`} prefetch>
+            <Link className="quick-action" href={`/${locale}/activity`} prefetch={false}>
               <span>Activity log</span>
               <small>Review imports and runs</small>
             </Link>
-            <Link className="quick-action" href={`/${locale}/help`} prefetch>
+            <Link className="quick-action" href={`/${locale}/help`} prefetch={false}>
               <span>Help center</span>
               <small>Use operating guides</small>
             </Link>
-            <Link className="quick-action" href={`/${locale}/settings`} prefetch>
+            <Link className="quick-action" href={`/${locale}/settings`} prefetch={false}>
               <span>Connect channels</span>
               <small>Manage integrations</small>
             </Link>
@@ -582,7 +582,7 @@ export default async function DashboardPage({
                   className="priority-item"
                   href={`/${locale}/${alert.href}`}
                   key={alert.title}
-                  prefetch
+                  prefetch={false}
                 >
                   <span className="priority-dot" aria-hidden="true" />
                   <div>

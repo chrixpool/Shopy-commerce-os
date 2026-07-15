@@ -206,6 +206,12 @@ export class MesColisController {
     return this.mesColis.syncLinked(user.organizationId);
   }
 
+  @Post('parcels/:id/refresh')
+  @RequireRole(Role.ADMIN)
+  refreshOne(@CurrentUser() user: SessionUser, @Param('id') id: string) {
+    return this.mesColis.refreshOne(user.organizationId, id);
+  }
+
   @Get('sync-runs')
   runs(@CurrentUser() user: SessionUser) {
     return this.mesColis.get(user.organizationId).then((value) => value.recentRuns);
@@ -228,7 +234,12 @@ export class MesColisController {
     @Param('id') id: string,
     @Body() body: Record<string, unknown>,
   ) {
-    return this.mesColis.link(user.organizationId, user.id, id, String(body.orderId ?? ''));
+    return this.mesColis.link(
+      user.organizationId,
+      user.id,
+      id,
+      String(body.orderReference ?? body.orderId ?? ''),
+    );
   }
 
   @Delete('parcels/:id/link')

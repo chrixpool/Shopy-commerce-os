@@ -1,6 +1,7 @@
 import Link from 'next/link';
 import { revalidatePath } from 'next/cache';
-import { EmptyState, MetricCard, PageHeader } from '@/components/ui/page';
+import { redirect } from 'next/navigation';
+import { EmptyState, MetricCard, PageHeader, StatusBadge } from '@/components/ui/page';
 import { apiFetch, getWorkspaceSettings } from '@/lib/api';
 import { formatMoney } from '@/lib/currency';
 
@@ -50,6 +51,16 @@ interface ProviderParcel {
   }>;
 }
 
+interface MesColisStatus {
+  status: string;
+  isActive: boolean;
+  credentialSaved: boolean;
+  socketHealth: string;
+  lastSocketEventAt?: string | null;
+  lastSyncAt?: string | null;
+  warningCount: number;
+}
+
 async function optionalApiFetch<T>(path: string, fallback: T) {
   try {
     return await apiFetch<T>(path);
@@ -58,71 +69,115 @@ async function optionalApiFetch<T>(path: string, fallback: T) {
   }
 }
 
-async function updateDelivery(formData: FormData) {
-  'use server';
-
-  const id = String(formData.get('id') ?? '');
-  const status = String(formData.get('status') ?? '');
-
-  await apiFetch(`/api/v1/delivery/${id}`, {
-    method: 'PATCH',
-    body: JSON.stringify({ status }),
-  });
-
-  revalidatePath('/[locale]/delivery', 'page');
-  revalidatePath('/[locale]/dashboard', 'page');
-  revalidatePath('/[locale]/orders', 'page');
-  revalidatePath('/[locale]/activity', 'page');
-  revalidatePath('/[locale]/finance', 'page');
-}
-
 async function lookupMesColis(formData: FormData) {
   'use server';
-  await apiFetch('/api/v1/integrations/mes-colis/lookup', {
-    method: 'POST',
-    body: JSON.stringify({
-      barcode: String(formData.get('barcode') ?? ''),
-      orderReference: String(formData.get('orderReference') ?? ''),
-    }),
-  });
-  revalidatePath('/[locale]/delivery', 'page');
-  revalidatePath('/[locale]/activity', 'page');
+  const locale = String(formData.get('locale') ?? 'en');
+  try {
+    await apiFetch('/api/v1/integrations/mes-colis/lookup', {
+      method: 'POST',
+      body: JSON.stringify({
+        barcode: String(formData.get('barcode') ?? ''),
+        orderReference: String(formData.get('orderReference') ?? ''),
+      }),
+    });
+    revalidateDelivery();
+  } catch (error) {
+    redirect(deliveryResultUrl(locale, 'error', actionMessage(error)));
+  }
+  redirect(deliveryResultUrl(locale, 'success', 'Barcode refreshed and saved.'));
 }
 
-async function refreshMesColis() {
+async function refreshMesColis(formData: FormData) {
   'use server';
-  await apiFetch('/api/v1/integrations/mes-colis/sync-linked', { method: 'POST' });
-  revalidatePath('/[locale]/delivery', 'page');
-  revalidatePath('/[locale]/dashboard', 'page');
-  revalidatePath('/[locale]/activity', 'page');
+  const locale = String(formData.get('locale') ?? 'en');
+  try {
+    await apiFetch('/api/v1/integrations/mes-colis/sync-linked', { method: 'POST' });
+    revalidateDelivery();
+  } catch (error) {
+    redirect(deliveryResultUrl(locale, 'error', actionMessage(error)));
+  }
+  redirect(deliveryResultUrl(locale, 'success', 'Linked barcodes refreshed.'));
+}
+
+async function refreshOneMesColis(formData: FormData) {
+  'use server';
+  const locale = String(formData.get('locale') ?? 'en');
+  const id = String(formData.get('id') ?? '');
+  try {
+    await apiFetch(`/api/v1/integrations/mes-colis/parcels/${id}/refresh`, { method: 'POST' });
+    revalidateDelivery();
+  } catch (error) {
+    redirect(deliveryResultUrl(locale, 'error', actionMessage(error)));
+  }
+  redirect(deliveryResultUrl(locale, 'success', 'Tracking refreshed.'));
 }
 
 async function linkMesColis(formData: FormData) {
   'use server';
+  const locale = String(formData.get('locale') ?? 'en');
   const id = String(formData.get('id') ?? '');
-  await apiFetch(`/api/v1/integrations/mes-colis/parcels/${id}/link`, {
-    method: 'POST',
-    body: JSON.stringify({ orderId: String(formData.get('orderId') ?? '') }),
-  });
-  revalidatePath('/[locale]/delivery', 'page');
-  revalidatePath('/[locale]/activity', 'page');
+  try {
+    await apiFetch(`/api/v1/integrations/mes-colis/parcels/${id}/link`, {
+      method: 'POST',
+      body: JSON.stringify({ orderReference: String(formData.get('orderReference') ?? '') }),
+    });
+    revalidateDelivery();
+  } catch (error) {
+    redirect(deliveryResultUrl(locale, 'error', actionMessage(error)));
+  }
+  redirect(deliveryResultUrl(locale, 'success', 'Tracking linked to the order.'));
 }
 
 async function unlinkMesColis(formData: FormData) {
   'use server';
+  const locale = String(formData.get('locale') ?? 'en');
   const id = String(formData.get('id') ?? '');
-  await apiFetch(`/api/v1/integrations/mes-colis/parcels/${id}/link`, { method: 'DELETE' });
-  revalidatePath('/[locale]/delivery', 'page');
+  try {
+    await apiFetch(`/api/v1/integrations/mes-colis/parcels/${id}/link`, { method: 'DELETE' });
+    revalidateDelivery();
+  } catch (error) {
+    redirect(deliveryResultUrl(locale, 'error', actionMessage(error)));
+  }
+  redirect(deliveryResultUrl(locale, 'success', 'Tracking link removed.'));
 }
 
-export default async function DeliveryPage({ params }: { params: Promise<{ locale: string }> }) {
+function revalidateDelivery() {
+  revalidatePath('/[locale]/delivery', 'page');
+  revalidatePath('/[locale]/dashboard', 'page');
+  revalidatePath('/[locale]/activity', 'page');
+}
+
+function deliveryResultUrl(locale: string, result: string, message: string) {
+  return `/${locale}/delivery?result=${encodeURIComponent(result)}&message=${encodeURIComponent(message)}`;
+}
+
+function actionMessage(error: unknown) {
+  return error instanceof Error ? error.message : 'This tracking action could not be completed.';
+}
+
+export default async function DeliveryPage({
+  params,
+  searchParams,
+}: {
+  params: Promise<{ locale: string }>;
+  searchParams: Promise<{ result?: string; message?: string }>;
+}) {
   const { locale } = await params;
-  const [parcels, workspace, providerParcels, mappingReview] = await Promise.all([
+  const notice = await searchParams;
+  const [parcels, workspace, providerParcels, mappingReview, mesColis] = await Promise.all([
     apiFetch<ParcelRecord[]>('/api/v1/delivery'),
     getWorkspaceSettings(),
     optionalApiFetch<ProviderParcel[]>('/api/v1/integrations/mes-colis/parcels', []),
     optionalApiFetch<ProviderParcel[]>('/api/v1/integrations/mes-colis/mapping-review', []),
+    optionalApiFetch<MesColisStatus>('/api/v1/integrations/mes-colis', {
+      status: 'DISCONNECTED',
+      isActive: false,
+      credentialSaved: false,
+      socketHealth: 'disconnected',
+      warningCount: 0,
+    }),
   ]);
+  const mesColisConnected = mesColis.status === 'CONNECTED' && mesColis.isActive;
   const inTransit = parcels.filter((parcel) =>
     ['PICKED_UP', 'IN_TRANSIT', 'OUT_FOR_DELIVERY'].includes(parcel.status),
   ).length;
@@ -136,6 +191,20 @@ export default async function DeliveryPage({ params }: { params: Promise<{ local
         title="Delivery"
         description="Dispatch parcels, track delivery attempts, and close delivered or returned orders."
       />
+
+      {notice.message ? (
+        <div
+          className={`status-banner ${notice.result === 'error' ? 'status-banner-warning' : ''}`}
+          role="status"
+        >
+          <div>
+            <strong>
+              {notice.result === 'error' ? 'Tracking needs attention' : 'Tracking updated'}
+            </strong>
+            <p>{notice.message}</p>
+          </div>
+        </div>
+      ) : null}
 
       <section className="stats-grid" aria-label="Delivery summary">
         <MetricCard
@@ -178,20 +247,59 @@ export default async function DeliveryPage({ params }: { params: Promise<{ local
             </p>
           </div>
           <form action={refreshMesColis}>
-            <button className="button button-secondary" type="submit">
+            <input name="locale" type="hidden" value={locale} />
+            <button
+              className="button button-secondary"
+              type="submit"
+              disabled={!mesColisConnected || providerParcels.length === 0}
+              title={!mesColisConnected ? 'Connect Mes Colis in Settings first.' : undefined}
+            >
               Refresh all
             </button>
           </form>
         </div>
+        <div className="snapshot-grid" style={{ marginTop: 14 }}>
+          <div>
+            <span className="metric-label">Connection</span>
+            <strong>{mesColisConnected ? 'Connected' : 'Not connected'}</strong>
+          </div>
+          <div>
+            <span className="metric-label">Live updates</span>
+            <strong>{mesColis.socketHealth.replaceAll('_', ' ')}</strong>
+          </div>
+          <div>
+            <span className="metric-label">Polling</span>
+            <strong>{mesColisConnected ? 'Available' : 'Waiting for connection'}</strong>
+          </div>
+        </div>
+        {!mesColisConnected ? (
+          <div className="status-banner status-banner-warning" style={{ marginTop: 14 }}>
+            <div>
+              <strong>Connect Mes Colis to enable tracking</strong>
+              <p>Save the read-only access token in Settings before looking up a barcode.</p>
+            </div>
+            <Link className="button button-secondary" href={`/${locale}/settings`} prefetch={false}>
+              Open Settings
+            </Link>
+          </div>
+        ) : null}
         <form action={lookupMesColis} className="inline-form" style={{ marginTop: 14 }}>
-          <input className="field" name="barcode" placeholder="Mes Colis barcode" required />
+          <input name="locale" type="hidden" value={locale} />
+          <input
+            className="field"
+            name="barcode"
+            placeholder="Mes Colis barcode"
+            required
+            disabled={!mesColisConnected}
+          />
           <input
             className="field"
             name="orderReference"
             placeholder="Optional exact order reference"
+            disabled={!mesColisConnected}
           />
-          <button className="button button-primary" type="submit">
-            Link barcode
+          <button className="button button-primary" type="submit" disabled={!mesColisConnected}>
+            Look up barcode
           </button>
         </form>
         <div className="snapshot-grid" style={{ marginTop: 14 }}>
@@ -242,10 +350,11 @@ export default async function DeliveryPage({ params }: { params: Promise<{ local
                   <td>
                     <form action={linkMesColis} className="inline-form">
                       <input name="id" type="hidden" value={item.id} />
+                      <input name="locale" type="hidden" value={locale} />
                       <input
                         className="field"
-                        name="orderId"
-                        placeholder="Exact Shopy order ID"
+                        name="orderReference"
+                        placeholder="Exact order reference"
                         required
                       />
                       <button className="button button-secondary" type="submit">
@@ -270,7 +379,7 @@ export default async function DeliveryPage({ params }: { params: Promise<{ local
                 <th>Normalized</th>
                 <th>Match</th>
                 <th>Last update</th>
-                <th>Action</th>
+                <th>Tracking</th>
               </tr>
             </thead>
             <tbody>
@@ -304,16 +413,39 @@ export default async function DeliveryPage({ params }: { params: Promise<{ local
                         >
                           Order
                         </Link>
+                        <form action={refreshOneMesColis}>
+                          <input name="id" type="hidden" value={item.id} />
+                          <input name="locale" type="hidden" value={locale} />
+                          <button className="button button-secondary" type="submit">
+                            Refresh
+                          </button>
+                        </form>
                         <form action={unlinkMesColis}>
                           <input name="id" type="hidden" value={item.id} />
+                          <input name="locale" type="hidden" value={locale} />
                           <button className="button button-secondary" type="submit">
                             Unlink
                           </button>
                         </form>
                       </div>
                     ) : (
-                      <span className="muted">Review mapping</span>
+                      <form action={refreshOneMesColis}>
+                        <input name="id" type="hidden" value={item.id} />
+                        <input name="locale" type="hidden" value={locale} />
+                        <button className="button button-secondary" type="submit">
+                          Refresh
+                        </button>
+                      </form>
                     )}
+                    {item.events?.length ? (
+                      <div className="field-help" style={{ marginTop: 8 }}>
+                        Latest: {item.events[0]?.providerStatus} at{' '}
+                        {new Intl.DateTimeFormat(locale, {
+                          dateStyle: 'medium',
+                          timeStyle: 'short',
+                        }).format(new Date(item.events[0]!.occurredAt))}
+                      </div>
+                    ) : null}
                   </td>
                 </tr>
               ))}
@@ -339,7 +471,7 @@ export default async function DeliveryPage({ params }: { params: Promise<{ local
                 <th>Value</th>
                 <th>Status</th>
                 <th>Latest event</th>
-                <th>Action</th>
+                <th>Mode</th>
               </tr>
             </thead>
             <tbody>
@@ -364,41 +496,7 @@ export default async function DeliveryPage({ params }: { params: Promise<{ local
                   </td>
                   <td>{parcel.events[0]?.note ?? parcel.events[0]?.status ?? '-'}</td>
                   <td>
-                    <form action={updateDelivery} className="inline-form">
-                      <input name="id" type="hidden" value={parcel.id} />
-                      <button
-                        className="button button-secondary"
-                        name="status"
-                        value="PICKED_UP"
-                        type="submit"
-                      >
-                        Dispatch
-                      </button>
-                      <button
-                        className="button button-secondary"
-                        name="status"
-                        value="FAILED_ATTEMPT"
-                        type="submit"
-                      >
-                        Failed
-                      </button>
-                      <button
-                        className="button button-secondary"
-                        name="status"
-                        value="RETURNED"
-                        type="submit"
-                      >
-                        Return
-                      </button>
-                      <button
-                        className="button button-primary"
-                        name="status"
-                        value="DELIVERED"
-                        type="submit"
-                      >
-                        Delivered
-                      </button>
-                    </form>
+                    <StatusBadge tone="info">Provider managed</StatusBadge>
                   </td>
                 </tr>
               ))}

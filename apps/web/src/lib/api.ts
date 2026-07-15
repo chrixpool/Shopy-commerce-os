@@ -79,6 +79,7 @@ async function requestApi<T>(
 
       if (!response.ok) {
         const durationMs = Date.now() - startedAt;
+        const responseMessage = await safeApiErrorMessage(response);
         console.warn(
           JSON.stringify({
             event: 'api_request_failed',
@@ -96,7 +97,7 @@ async function requestApi<T>(
           );
         }
         throw new ApiRequestError(
-          `The workspace request failed (${response.status}).`,
+          responseMessage ?? `The workspace request failed (${response.status}).`,
           response.status,
         );
       }
@@ -132,6 +133,18 @@ async function requestApi<T>(
     );
   }
   throw new ApiRequestError('The workspace service could not be reached.', undefined, 'error');
+}
+
+async function safeApiErrorMessage(response: Response) {
+  try {
+    const payload = (await response.json()) as { message?: unknown };
+    const message = Array.isArray(payload.message) ? payload.message[0] : payload.message;
+    if (typeof message !== 'string' || !message.trim() || message.length > 240) return null;
+    if (/token|secret|password|credential|authorization|cookie/i.test(message)) return null;
+    return message.trim();
+  } catch {
+    return null;
+  }
 }
 
 export async function apiFetch<T>(path: string, init: RequestInit = {}): Promise<T> {

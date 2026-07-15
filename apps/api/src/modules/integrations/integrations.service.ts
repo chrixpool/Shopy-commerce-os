@@ -269,6 +269,7 @@ export class IntegrationsService implements OnModuleInit {
   }
 
   async syncAllRun(organizationId: string, runId: string) {
+    await this.recoverStaleSyncAllRuns();
     const run = await this.prisma.automationRun.findFirst({
       where: { id: runId, organizationId, inputSnapshot: { path: ['type'], equals: 'SYNC_ALL' } },
     });
@@ -277,6 +278,7 @@ export class IntegrationsService implements OnModuleInit {
   }
 
   async syncAllRuns(organizationId: string) {
+    await this.recoverStaleSyncAllRuns();
     const runs = await this.prisma.automationRun.findMany({
       where: { organizationId, inputSnapshot: { path: ['type'], equals: 'SYNC_ALL' } },
       orderBy: { startedAt: 'desc' },
@@ -322,7 +324,11 @@ export class IntegrationsService implements OnModuleInit {
             'linked' in result ? result : { linked: 0, updated: 0, unchanged: 0, failed: 1 };
           providerResult = syncProviderResult(
             provider,
-            result.status === 'FAILED' ? 'failed' : 'success',
+            result.status === 'FAILED'
+              ? 'failed'
+              : result.status === 'PARTIAL'
+                ? 'partial'
+                : 'success',
             startedAt,
             {
               found: totals.linked,
@@ -363,7 +369,12 @@ export class IntegrationsService implements OnModuleInit {
         await this.prisma.integrationSyncProviderRun.update({
           where: { parentRunId_provider: { parentRunId: durableRunId, provider } },
           data: {
-            status: providerResult.status === 'success' ? 'SUCCESS' : 'FAILED',
+            status:
+              providerResult.status === 'success'
+                ? 'SUCCESS'
+                : providerResult.status === 'partial'
+                  ? 'PARTIAL'
+                  : 'FAILED',
             finishedAt: new Date(),
             totals: {
               found: providerResult.found,
@@ -389,7 +400,8 @@ export class IntegrationsService implements OnModuleInit {
     }
     const successful = providers.filter((item) => item.status === 'success').length;
     const failed = providers.filter((item) => item.status === 'failed').length;
-    const status = failed && successful ? 'partial' : failed ? 'failed' : 'success';
+    const partial = providers.filter((item) => item.status === 'partial').length;
+    const status = partial || (failed && successful) ? 'partial' : failed ? 'failed' : 'success';
     await this.prisma.automationRun.update({
       where: { id: runId },
       data: {
@@ -1771,7 +1783,7 @@ function sanitizeWarnings(result: Record<string, unknown>) {
 
 function syncProviderResult(
   provider: IntegrationProvider,
-  status: 'success' | 'failed',
+  status: 'success' | 'partial' | 'failed',
   startedAt: Date,
   counts: ReturnType<typeof safeProviderCounts> | null,
   warnings: string[],

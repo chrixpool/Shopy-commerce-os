@@ -49,7 +49,7 @@ export function MetricCard({
     </>
   );
   return href ? (
-    <Link className="card metric-card metric-card-link" href={href} prefetch>
+    <Link className="card metric-card metric-card-link" href={href} prefetch={false}>
       {content}
     </Link>
   ) : (

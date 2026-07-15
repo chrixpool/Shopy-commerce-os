@@ -157,7 +157,7 @@ export default async function FinancePage({
         title="Finance"
         description="Track revenue, active order value, returns, cancellations, and recent financial movement from live order records."
         actions={
-          <Link className="button button-primary" href={`/${locale}/orders`} prefetch>
+          <Link className="button button-primary" href={`/${locale}/orders`} prefetch={false}>
             Review orders
           </Link>
         }
@@ -271,7 +271,7 @@ export default async function FinancePage({
             title="Financial data quality"
             description="Resolve these items before treating margin as complete. Missing costs are never assumed to be zero."
             actions={
-              <Link className="button button-primary" href={`/${locale}/factory`} prefetch>
+              <Link className="button button-primary" href={`/${locale}/factory`} prefetch={false}>
                 Complete costs
               </Link>
             }

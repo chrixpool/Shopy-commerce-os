@@ -4,6 +4,7 @@ import {
   NotFoundException,
   OnModuleDestroy,
   OnModuleInit,
+  ServiceUnavailableException,
 } from '@nestjs/common';
 import { IntegrationProvider, IntegrationStatus, ParcelMatchState, Prisma } from '@prisma/client';
 import { createHash } from 'node:crypto';
@@ -223,6 +224,22 @@ export class MesColisService implements OnModuleInit, OnModuleDestroy {
     });
   }
 
+  async refreshOne(organizationId: string, providerParcelId: string) {
+    const parcel = await this.prisma.providerParcel.findFirst({
+      where: {
+        id: providerParcelId,
+        organizationId,
+        provider: IntegrationProvider.MES_COLIS,
+      },
+      select: { barcode: true },
+    });
+    if (!parcel) throw new NotFoundException('Mes Colis tracking record not found.');
+    const token = await this.token(organizationId);
+    return this.ingest(organizationId, await this.getOrder(token, parcel.barcode), {
+      source: 'poll',
+    });
+  }
+
   async syncLinked(organizationId: string) {
     const active = await this.prisma.automationRun.findFirst({
       where: {
@@ -232,6 +249,7 @@ export class MesColisService implements OnModuleInit, OnModuleDestroy {
       },
     });
     if (active) return { runId: active.id, status: active.status, duplicatePrevented: true };
+    const token = await this.token(organizationId);
     const run = await this.prisma.automationRun.create({
       data: {
         organizationId,
@@ -240,7 +258,6 @@ export class MesColisService implements OnModuleInit, OnModuleDestroy {
         inputSnapshot: { provider: 'MES_COLIS', type: 'SYNC' },
       },
     });
-    const token = await this.token(organizationId);
     const providerRows = await this.prisma.providerParcel.findMany({
       where: { organizationId, provider: IntegrationProvider.MES_COLIS },
       select: { barcode: true },
@@ -294,11 +311,16 @@ export class MesColisService implements OnModuleInit, OnModuleDestroy {
         totals.failed += 1;
       }
     }
-    const status = totals.failed === barcodes.length && barcodes.length ? 'FAILED' : 'SUCCESS';
+    const status =
+      totals.failed === 0 ? 'SUCCESS' : totals.failed === barcodes.length ? 'FAILED' : 'PARTIAL';
     await this.prisma.$transaction([
       this.prisma.automationRun.update({
         where: { id: run.id },
-        data: { status, finishedAt: new Date(), outputSnapshot: totals },
+        data: {
+          status: status === 'FAILED' ? 'FAILED' : 'SUCCESS',
+          finishedAt: new Date(),
+          outputSnapshot: { ...totals, status },
+        },
       }),
       this.prisma.integration.update({
         where: {
@@ -343,17 +365,30 @@ export class MesColisService implements OnModuleInit, OnModuleDestroy {
     });
   }
 
-  async link(organizationId: string, userId: string, providerParcelId: string, orderId: string) {
+  async link(
+    organizationId: string,
+    userId: string,
+    providerParcelId: string,
+    orderReference: string,
+  ) {
+    const reference = orderReference.trim();
+    if (!reference) throw new BadRequestException('Enter an exact Shopy order reference.');
     const [parcel, order] = await Promise.all([
       this.prisma.providerParcel.findFirst({ where: { id: providerParcelId, organizationId } }),
-      this.prisma.order.findFirst({ where: { id: orderId, organizationId }, select: { id: true } }),
+      this.prisma.order.findFirst({
+        where: {
+          organizationId,
+          OR: [{ id: reference }, { orderNumber: reference }, { externalId: reference }],
+        },
+        select: { id: true },
+      }),
     ]);
     if (!parcel || !order) throw new NotFoundException('Parcel or order not found.');
     return this.prisma.$transaction(async (tx) => {
       const updated = await tx.providerParcel.update({
         where: { id: parcel.id },
         data: {
-          orderId,
+          orderId: order.id,
           matchState: ParcelMatchState.MANUAL,
           matchConfidence: 100,
           matchReasons: ['manual_operator_link'],
@@ -361,11 +396,11 @@ export class MesColisService implements OnModuleInit, OnModuleDestroy {
       });
       await tx.orderEvent.create({
         data: {
-          orderId,
+          orderId: order.id,
           userId,
           type: 'mes_colis_linked',
           note: 'Mes Colis tracking linked manually',
-          data: { providerParcelId: parcel.id },
+          data: { providerParcelId: parcel.id, source: 'USER' },
         },
       });
       return safeParcel(updated);
@@ -384,7 +419,7 @@ export class MesColisService implements OnModuleInit, OnModuleDestroy {
           userId,
           type: 'mes_colis_unlinked',
           note: 'Mes Colis tracking link removed',
-          data: { providerParcelId },
+          data: { providerParcelId, source: 'USER' },
         },
       });
     }
@@ -512,7 +547,12 @@ export class MesColisService implements OnModuleInit, OnModuleDestroy {
           orderId: providerParcel.orderId,
           type: 'mes_colis_status',
           note: `Mes Colis status updated to ${providerStatus}`,
-          data: { providerParcelId: providerParcel.id, normalizedStatus, source: context.source },
+          data: {
+            providerParcelId: providerParcel.id,
+            normalizedStatus,
+            source: 'MES_COLIS',
+            transport: context.source,
+          },
         },
       });
     }
@@ -601,41 +641,94 @@ export class MesColisService implements OnModuleInit, OnModuleDestroy {
   }
 
   private async testToken(token: string) {
-    const response = await fetch(`${MES_COLIS_API()}/orders/GetOrder`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json', 'x-access-token': token },
-      body: JSON.stringify({ barcode: 'SHOPY-CONNECTION-TEST' }),
-      signal: AbortSignal.timeout(12_000),
-    });
-    const body = await safeJson(response);
-    const code = String(body.code ?? body.error ?? body.message ?? '').toUpperCase();
-    if (response.ok || code.includes('ORDER_NOT_FOUND') || code.includes('ORDERS_NOTFOUND')) {
-      return { ok: true, message: 'Mes Colis credentials are valid.' };
-    }
-    if (code.includes('INVALID_TOKEN') || code.includes('NO_TOKEN')) {
+    try {
+      const response = await fetch(`${MES_COLIS_API()}/orders/GetOrder`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', 'x-access-token': token },
+        body: JSON.stringify({ barcode: 'SHOPY-CONNECTION-TEST' }),
+        signal: AbortSignal.timeout(12_000),
+      });
+      const body = await safeJson(response);
+      const code = providerCode(body);
+      if (response.ok || code.includes('ORDER_NOT_FOUND') || code.includes('ORDERS_NOTFOUND')) {
+        return { ok: true, message: 'Mes Colis credentials are valid.' };
+      }
+      if (
+        code.includes('INVALID_TOKEN') ||
+        code.includes('NO_TOKEN') ||
+        code.includes('USER_NOT_FOUND')
+      ) {
+        return {
+          ok: false,
+          message: 'Mes Colis rejected this access token. Reconnect with a valid token.',
+        };
+      }
+      if (code.includes('ACCESS_DENIED')) {
+        return {
+          ok: false,
+          message: 'This Mes Colis account cannot read parcel tracking. Check account access.',
+        };
+      }
       return {
         ok: false,
-        message: 'Mes Colis rejected this access token. Reconnect with a valid token.',
+        message:
+          'Mes Colis could not verify this connection. Try again when the provider is available.',
+      };
+    } catch (error) {
+      return {
+        ok: false,
+        message:
+          error instanceof Error && error.name === 'TimeoutError'
+            ? 'Mes Colis did not respond in time. Try the connection test again.'
+            : 'Mes Colis is currently unreachable. Your other Shopy workflows are unaffected.',
       };
     }
-    return { ok: false, message: 'Mes Colis connection could not be verified. Try again shortly.' };
   }
 
   private async getOrder(token: string, barcode: string) {
-    const response = await fetch(`${MES_COLIS_API()}/orders/GetOrder`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json', 'x-access-token': token },
-      body: JSON.stringify({ barcode }),
-      signal: AbortSignal.timeout(15_000),
-    });
-    const body = await safeJson(response);
-    if (!response.ok) {
-      const code = String(body.code ?? body.error ?? '').toUpperCase();
-      if (code.includes('ORDER_NOT_FOUND'))
-        throw new NotFoundException('Mes Colis could not find this barcode.');
-      throw new BadRequestException('Mes Colis tracking is temporarily unavailable.');
+    try {
+      const response = await fetch(`${MES_COLIS_API()}/orders/GetOrder`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', 'x-access-token': token },
+        body: JSON.stringify({ barcode }),
+        signal: AbortSignal.timeout(15_000),
+      });
+      const body = await safeJson(response);
+      const code = providerCode(body);
+      if (!response.ok) {
+        if (code.includes('ORDER_NOT_FOUND') || code.includes('ORDERS_NOTFOUND'))
+          throw new NotFoundException('Mes Colis could not find this barcode.');
+        if (
+          code.includes('INVALID_TOKEN') ||
+          code.includes('NO_TOKEN') ||
+          code.includes('USER_NOT_FOUND')
+        )
+          throw new BadRequestException('Mes Colis access expired. Reconnect in Settings.');
+        if (code.includes('ACCESS_DENIED'))
+          throw new BadRequestException('This Mes Colis account cannot read that parcel.');
+        throw new ServiceUnavailableException(
+          'Mes Colis tracking is temporarily unavailable. Existing tracking remains visible.',
+        );
+      }
+      if (!body.barcode || !body.status) {
+        throw new ServiceUnavailableException(
+          'Mes Colis returned an incomplete tracking response. Try again later.',
+        );
+      }
+      return body;
+    } catch (error) {
+      if (
+        error instanceof BadRequestException ||
+        error instanceof NotFoundException ||
+        error instanceof ServiceUnavailableException
+      )
+        throw error;
+      throw new ServiceUnavailableException(
+        error instanceof Error && error.name === 'TimeoutError'
+          ? 'Mes Colis tracking timed out. Try again shortly.'
+          : 'Mes Colis is currently unreachable. Existing tracking remains visible.',
+      );
     }
-    return body;
   }
 
   private async mergedConfig(organizationId: string, patch: Record<string, unknown>) {
@@ -750,4 +843,12 @@ async function safeJson(response: Response): Promise<Record<string, unknown>> {
   } catch {
     return {};
   }
+}
+
+function providerCode(body: Record<string, unknown>) {
+  return [body.code, body.error, body.message, body.status]
+    .filter((value) => value != null)
+    .map(String)
+    .join(' ')
+    .toUpperCase();
 }

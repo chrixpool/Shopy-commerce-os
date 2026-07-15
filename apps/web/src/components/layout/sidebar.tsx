@@ -74,7 +74,7 @@ function NavGroup({
             <li key={item.key}>
               <Link
                 href={href}
-                prefetch
+                prefetch={false}
                 className={`nav-link${isActive ? ' nav-link-active' : ''}`}
                 aria-current={isActive ? 'page' : undefined}
                 title={t(item.key)}
