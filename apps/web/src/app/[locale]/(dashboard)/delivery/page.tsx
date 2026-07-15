@@ -410,6 +410,7 @@ export default async function DeliveryPage({
                         <Link
                           className="button button-secondary"
                           href={`/${locale}/orders/${item.orderId}`}
+                          prefetch={false}
                         >
                           Order
                         </Link>
@@ -479,7 +480,7 @@ export default async function DeliveryPage({
                 <tr key={parcel.id}>
                   <td>
                     <div className="strong-cell">
-                      <Link href={`/${locale}/orders/${parcel.order.id}`}>
+                      <Link href={`/${locale}/orders/${parcel.order.id}`} prefetch={false}>
                         {parcel.trackingNumber ?? parcel.order.orderNumber}
                       </Link>
                     </div>

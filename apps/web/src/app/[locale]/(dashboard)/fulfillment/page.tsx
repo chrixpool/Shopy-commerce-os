@@ -120,7 +120,7 @@ export default async function FulfillmentPage({ params }: { params: Promise<{ lo
               {tasks.map((task) => (
                 <tr key={task.id}>
                   <td className="strong-cell">
-                    <Link href={`/${locale}/orders/${task.order.id}`}>
+                    <Link href={`/${locale}/orders/${task.order.id}`} prefetch={false}>
                       {task.order.orderNumber}
                     </Link>
                   </td>

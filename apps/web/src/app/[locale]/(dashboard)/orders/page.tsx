@@ -381,7 +381,9 @@ export default async function OrdersPage({
               {orders.data.map((order) => (
                 <tr key={order.id}>
                   <td className="strong-cell">
-                    <Link href={`/${locale}/orders/${order.id}`}>{order.orderNumber}</Link>
+                    <Link href={`/${locale}/orders/${order.id}`} prefetch={false}>
+                      {order.orderNumber}
+                    </Link>
                   </td>
                   <td>
                     <div className="strong-cell">{order.customerName}</div>

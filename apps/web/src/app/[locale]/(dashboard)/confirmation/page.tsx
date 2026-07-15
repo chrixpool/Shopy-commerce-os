@@ -230,7 +230,7 @@ export default async function ConfirmationPage({
                 {tasks.map((task) => (
                   <tr key={task.id}>
                     <td className="strong-cell">
-                      <Link href={`/${locale}/orders/${task.order.id}`}>
+                      <Link href={`/${locale}/orders/${task.order.id}`} prefetch={false}>
                         {task.order.orderNumber}
                       </Link>
                       <div className="field-help">{ageLabel(task.order.createdAt)}</div>
