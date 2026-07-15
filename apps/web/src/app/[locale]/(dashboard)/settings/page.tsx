@@ -1,6 +1,9 @@
 import { revalidatePath } from 'next/cache';
-import { redirect } from 'next/navigation';
-import { FormSubmitButton } from '@/components/ui/form-submit-button';
+import {
+  FormSubmitButton,
+  IntegrationActionForm,
+  type FormActionState,
+} from '@/components/ui/form-submit-button';
 import { MetricCard, PageHeader, StatusBadge, SurfaceCard } from '@/components/ui/page';
 import { apiFetch } from '@/lib/api';
 import { formatMoney, SUPPORTED_CURRENCIES } from '@/lib/currency';
@@ -147,10 +150,12 @@ async function updateOrganization(formData: FormData) {
   revalidatePath('/[locale]/dashboard', 'layout');
 }
 
-async function connectIntegration(formData: FormData) {
+async function connectIntegration(
+  _state: FormActionState,
+  formData: FormData,
+): Promise<FormActionState> {
   'use server';
 
-  const locale = safeLocale(formData.get('locale'));
   const provider = String(formData.get('provider') ?? '');
   const path =
     provider === 'MES_COLIS'
@@ -176,18 +181,15 @@ async function connectIntegration(formData: FormData) {
     });
     revalidatePath('/[locale]/settings', 'page');
   } catch (error) {
-    redirect(settingsResultUrl(locale, 'error', provider, actionMessage(error)));
+    return { status: 'error', message: actionMessage(error) };
   }
-  redirect(
-    settingsResultUrl(
-      locale,
-      'success',
-      provider,
+  return {
+    status: 'success',
+    message:
       provider === 'MES_COLIS'
         ? 'Mes Colis token accepted and saved securely. Parcel access will be confirmed on the first barcode lookup.'
         : `${providerLabel(provider)} connected and verified.`,
-    ),
-  );
+  };
 }
 
 async function selectMetaAccount(formData: FormData) {
@@ -208,10 +210,12 @@ async function syncAllIntegrations() {
   revalidatePath('/[locale]/campaigns', 'page');
 }
 
-async function syncIntegration(formData: FormData) {
+async function syncIntegration(
+  _state: FormActionState,
+  formData: FormData,
+): Promise<FormActionState> {
   'use server';
 
-  const locale = safeLocale(formData.get('locale'));
   const provider = String(formData.get('provider') ?? '');
   const dryRun = formData.get('dryRun') === 'true';
   let successMessage = `${providerLabel(provider)} ${dryRun ? 'dry-run' : 'sync'} completed.`;
@@ -233,19 +237,21 @@ async function syncIntegration(formData: FormData) {
       );
     }
   } catch (error) {
-    redirect(settingsResultUrl(locale, 'error', provider, actionMessage(error)));
+    return { status: 'error', message: actionMessage(error) };
   }
 
   revalidatePath('/[locale]/settings', 'page');
   revalidatePath('/[locale]/campaigns', 'page');
   revalidatePath('/[locale]/dashboard', 'page');
-  redirect(settingsResultUrl(locale, 'success', provider, successMessage));
+  return { status: 'success', message: successMessage };
 }
 
-async function testIntegration(formData: FormData) {
+async function testIntegration(
+  _state: FormActionState,
+  formData: FormData,
+): Promise<FormActionState> {
   'use server';
 
-  const locale = safeLocale(formData.get('locale'));
   const provider = String(formData.get('provider') ?? '');
   const path =
     provider === 'MES_COLIS'
@@ -255,22 +261,20 @@ async function testIntegration(formData: FormData) {
     await apiFetch(path, { method: 'POST' });
     revalidatePath('/[locale]/settings', 'page');
   } catch (error) {
-    redirect(settingsResultUrl(locale, 'error', provider, actionMessage(error)));
+    return { status: 'error', message: actionMessage(error) };
   }
-  redirect(
-    settingsResultUrl(
-      locale,
-      'success',
-      provider,
-      `${providerLabel(provider)} connection test passed.`,
-    ),
-  );
+  return {
+    status: 'success',
+    message: `${providerLabel(provider)} connection test passed.`,
+  };
 }
 
-async function disconnectIntegration(formData: FormData) {
+async function disconnectIntegration(
+  _state: FormActionState,
+  formData: FormData,
+): Promise<FormActionState> {
   'use server';
 
-  const locale = safeLocale(formData.get('locale'));
   const provider = String(formData.get('provider') ?? '');
   const path =
     provider === 'MES_COLIS'
@@ -280,11 +284,9 @@ async function disconnectIntegration(formData: FormData) {
     await apiFetch(path, { method: 'POST' });
     revalidatePath('/[locale]/settings', 'page');
   } catch (error) {
-    redirect(settingsResultUrl(locale, 'error', provider, actionMessage(error)));
+    return { status: 'error', message: actionMessage(error) };
   }
-  redirect(
-    settingsResultUrl(locale, 'success', provider, `${providerLabel(provider)} disconnected.`),
-  );
+  return { status: 'success', message: `${providerLabel(provider)} disconnected.` };
 }
 
 async function repairWorkflows() {
@@ -299,20 +301,11 @@ async function repairWorkflows() {
   revalidatePath('/[locale]/fulfillment', 'page');
 }
 
-function safeLocale(value: FormDataEntryValue | null) {
-  const locale = String(value ?? 'en');
-  return ['en', 'fr', 'ar'].includes(locale) ? locale : 'en';
-}
-
 function providerLabel(provider: string) {
   return provider
     .toLowerCase()
     .replaceAll('_', ' ')
     .replace(/\b\w/g, (letter) => letter.toUpperCase());
-}
-
-function settingsResultUrl(locale: string, result: string, provider: string, message: string) {
-  return `/${locale}/settings?result=${encodeURIComponent(result)}&provider=${encodeURIComponent(provider)}&message=${encodeURIComponent(message)}`;
 }
 
 function actionMessage(error: unknown) {
@@ -321,22 +314,8 @@ function actionMessage(error: unknown) {
     : 'The integration action could not be completed. Try again.';
 }
 
-function firstQueryValue(value: string | string[] | undefined) {
-  return Array.isArray(value) ? value[0] : value;
-}
-
-export default async function SettingsPage({
-  params,
-  searchParams,
-}: {
-  params: Promise<{ locale: string }>;
-  searchParams: Promise<Record<string, string | string[] | undefined>>;
-}) {
+export default async function SettingsPage({ params }: { params: Promise<{ locale: string }> }) {
   const { locale } = await params;
-  const notice = await searchParams;
-  const noticeResult = firstQueryValue(notice.result);
-  const noticeMessage = firstQueryValue(notice.message);
-  const noticeProvider = firstQueryValue(notice.provider);
   const [
     organization,
     integrations,
@@ -377,22 +356,6 @@ export default async function SettingsPage({
         title="Settings"
         description="Manage workspace identity, operating currency, and connected workflow capabilities."
       />
-
-      {noticeMessage ? (
-        <div
-          className={`status-banner ${noticeResult === 'error' ? 'status-banner-warning' : ''}`}
-          role={noticeResult === 'error' ? 'alert' : 'status'}
-        >
-          <div>
-            <strong>
-              {noticeResult === 'error'
-                ? `${providerLabel(noticeProvider ?? 'integration')} needs attention`
-                : 'Integration action completed'}
-            </strong>
-            <p>{noticeMessage}</p>
-          </div>
-        </div>
-      ) : null}
 
       <section className="stats-grid" aria-label="Settings summary">
         <MetricCard
@@ -612,7 +575,10 @@ export default async function SettingsPage({
                             : 'Available without external credentials.'}
                 </p>
                 {isExternal ? (
-                  <form action={connectIntegration} className="form-grid compact-form">
+                  <IntegrationActionForm
+                    action={connectIntegration}
+                    className="form-grid compact-form"
+                  >
                     <input name="locale" type="hidden" value={locale} />
                     <input name="provider" type="hidden" value={integration.provider} />
                     <input name="mode" type="hidden" value="READ_ONLY" />
@@ -758,11 +724,11 @@ export default async function SettingsPage({
                           : 'Save connection'}
                       </FormSubmitButton>
                     </div>
-                  </form>
+                  </IntegrationActionForm>
                 ) : null}
                 <div className="button-row">
                   {isExternal ? (
-                    <form action={testIntegration}>
+                    <IntegrationActionForm action={testIntegration}>
                       <input name="locale" type="hidden" value={locale} />
                       <input name="provider" type="hidden" value={integration.provider} />
                       <FormSubmitButton
@@ -778,10 +744,10 @@ export default async function SettingsPage({
                       >
                         Test
                       </FormSubmitButton>
-                    </form>
+                    </IntegrationActionForm>
                   ) : null}
                   {integration.provider !== 'MES_COLIS' ? (
-                    <form action={syncIntegration}>
+                    <IntegrationActionForm action={syncIntegration}>
                       <input name="locale" type="hidden" value={locale} />
                       <input name="provider" type="hidden" value={integration.provider} />
                       <input name="dryRun" type="hidden" value="true" />
@@ -793,9 +759,9 @@ export default async function SettingsPage({
                       >
                         Dry-run sync
                       </FormSubmitButton>
-                    </form>
+                    </IntegrationActionForm>
                   ) : null}
-                  <form action={syncIntegration}>
+                  <IntegrationActionForm action={syncIntegration}>
                     <input name="locale" type="hidden" value={locale} />
                     <input name="provider" type="hidden" value={integration.provider} />
                     <input name="dryRun" type="hidden" value="false" />
@@ -812,10 +778,10 @@ export default async function SettingsPage({
                     >
                       Sync now
                     </FormSubmitButton>
-                  </form>
+                  </IntegrationActionForm>
                   {['SHOPIFY', 'MES_COLIS'].includes(integration.provider) &&
                   integration.status === 'CONNECTED' ? (
-                    <form action={disconnectIntegration}>
+                    <IntegrationActionForm action={disconnectIntegration}>
                       <input name="locale" type="hidden" value={locale} />
                       <input name="provider" type="hidden" value={integration.provider} />
                       <FormSubmitButton
@@ -825,7 +791,7 @@ export default async function SettingsPage({
                       >
                         Disconnect
                       </FormSubmitButton>
-                    </form>
+                    </IntegrationActionForm>
                   ) : null}
                 </div>
                 {integration.provider === 'META_ADS' ? (
