@@ -156,7 +156,11 @@ export class MesColisService implements OnModuleInit, OnModuleDestroy {
         mode: 'READ_ONLY',
         credentials: {},
         encryptedCredentials: encryptedCredentials as unknown as Prisma.InputJsonValue,
-        config: { lastTestAt: now.toISOString(), apiBaseUrl: MES_COLIS_API() },
+        config: {
+          lastTestAt: now.toISOString(),
+          apiBaseUrl: MES_COLIS_API(),
+          connectionValidation: tested.verification,
+        },
       },
       update: {
         status: IntegrationStatus.CONNECTED,
@@ -165,7 +169,11 @@ export class MesColisService implements OnModuleInit, OnModuleDestroy {
         errorMessage: null,
         credentials: {},
         encryptedCredentials: encryptedCredentials as unknown as Prisma.InputJsonValue,
-        config: { lastTestAt: now.toISOString(), apiBaseUrl: MES_COLIS_API() },
+        config: {
+          lastTestAt: now.toISOString(),
+          apiBaseUrl: MES_COLIS_API(),
+          connectionValidation: tested.verification,
+        },
       },
     });
     this.startSocket(organizationId, token);
@@ -183,9 +191,15 @@ export class MesColisService implements OnModuleInit, OnModuleDestroy {
         status: result.ok ? IntegrationStatus.CONNECTED : IntegrationStatus.ERROR,
         isActive: result.ok,
         errorMessage: result.ok ? null : result.message,
-        config: await this.mergedConfig(organizationId, { lastTestAt: new Date().toISOString() }),
+        config: await this.mergedConfig(organizationId, {
+          lastTestAt: new Date().toISOString(),
+          connectionValidation: result.verification,
+        }),
       },
     });
+    if (!result.ok) {
+      throw new BadRequestException(result.message);
+    }
     return result;
   }
 
@@ -645,38 +659,15 @@ export class MesColisService implements OnModuleInit, OnModuleDestroy {
       const response = await fetch(`${MES_COLIS_API()}/orders/GetOrder`, {
         method: 'POST',
         headers: { 'content-type': 'application/json', 'x-access-token': token },
-        body: JSON.stringify({ barcode: 'SHOPY-CONNECTION-TEST' }),
+        body: JSON.stringify({ barcode: '9999999999999' }),
         signal: AbortSignal.timeout(12_000),
       });
       const body = await safeJson(response);
-      const code = providerCode(body);
-      if (response.ok || code.includes('ORDER_NOT_FOUND') || code.includes('ORDERS_NOTFOUND')) {
-        return { ok: true, message: 'Mes Colis credentials are valid.' };
-      }
-      if (
-        code.includes('INVALID_TOKEN') ||
-        code.includes('NO_TOKEN') ||
-        code.includes('USER_NOT_FOUND')
-      ) {
-        return {
-          ok: false,
-          message: 'Mes Colis rejected this access token. Reconnect with a valid token.',
-        };
-      }
-      if (code.includes('ACCESS_DENIED')) {
-        return {
-          ok: false,
-          message: 'This Mes Colis account cannot read parcel tracking. Check account access.',
-        };
-      }
-      return {
-        ok: false,
-        message:
-          'Mes Colis could not verify this connection. Try again when the provider is available.',
-      };
+      return classifyMesColisConnectionResponse(response.status, body);
     } catch (error) {
       return {
         ok: false,
+        verification: 'UNAVAILABLE' as const,
         message:
           error instanceof Error && error.name === 'TimeoutError'
             ? 'Mes Colis did not respond in time. Try the connection test again.'
@@ -845,8 +836,63 @@ async function safeJson(response: Response): Promise<Record<string, unknown>> {
   }
 }
 
+export function classifyMesColisConnectionResponse(status: number, body: Record<string, unknown>) {
+  const code = providerCode(body);
+  if (status >= 200 && status < 300) {
+    return {
+      ok: true,
+      verification: 'VERIFIED' as const,
+      message: 'Mes Colis credentials are valid.',
+    };
+  }
+  if (
+    status === 501 ||
+    code.includes('INVALID_TOKEN') ||
+    code.includes('NO_TOKEN') ||
+    code.includes('USER_NOT_FOUND') ||
+    code.includes('CANNOT_GET_USER_BY_TOKEN')
+  ) {
+    return {
+      ok: false,
+      verification: 'REJECTED' as const,
+      message: 'Mes Colis rejected this access token. Reconnect with a valid token.',
+    };
+  }
+  if (code.includes('ORDER_NOT_FOUND') || code.includes('ORDERS_NOTFOUND')) {
+    return {
+      ok: true,
+      verification: 'VERIFIED' as const,
+      message: 'Mes Colis credentials are valid.',
+    };
+  }
+  if (status === 403) {
+    // Mes Colis documents authentication failures as 501. A 403 from GetOrder
+    // means the token reached parcel-level authorization or validation.
+    return {
+      ok: true,
+      verification: 'TOKEN_ACCEPTED' as const,
+      message:
+        'Mes Colis accepted the token. Parcel access will be confirmed on the first barcode lookup.',
+    };
+  }
+  return {
+    ok: false,
+    verification: 'UNAVAILABLE' as const,
+    message:
+      'Mes Colis could not verify this connection. Try again when the provider is available.',
+  };
+}
+
 function providerCode(body: Record<string, unknown>) {
-  return [body.code, body.error, body.message, body.status]
+  const nestedError = asRecord(body.error);
+  return [
+    body.code,
+    typeof body.error === 'string' ? body.error : null,
+    body.message,
+    body.status,
+    nestedError.code,
+    nestedError.message,
+  ]
     .filter((value) => value != null)
     .map(String)
     .join(' ')

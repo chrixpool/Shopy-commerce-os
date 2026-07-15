@@ -1,4 +1,6 @@
 import { revalidatePath } from 'next/cache';
+import { redirect } from 'next/navigation';
+import { FormSubmitButton } from '@/components/ui/form-submit-button';
 import { MetricCard, PageHeader, StatusBadge, SurfaceCard } from '@/components/ui/page';
 import { apiFetch } from '@/lib/api';
 import { formatMoney, SUPPORTED_CURRENCIES } from '@/lib/currency';
@@ -148,30 +150,44 @@ async function updateOrganization(formData: FormData) {
 async function connectIntegration(formData: FormData) {
   'use server';
 
+  const locale = safeLocale(formData.get('locale'));
   const provider = String(formData.get('provider') ?? '');
   const path =
     provider === 'MES_COLIS'
       ? '/api/v1/integrations/mes-colis/connect'
       : `/api/v1/integrations/${provider.toLowerCase().replaceAll('_', '-')}/connect`;
-  await apiFetch(path, {
-    method: 'POST',
-    body: JSON.stringify({
-      connectionName: String(formData.get('connectionName') ?? ''),
-      connectionMethod: String(formData.get('connectionMethod') ?? ''),
-      shopDomain: String(formData.get('shopDomain') ?? ''),
-      clientId: String(formData.get('clientId') ?? ''),
-      clientSecret: String(formData.get('clientSecret') ?? ''),
-      adminAccessToken: String(formData.get('adminAccessToken') ?? ''),
-      accountId: String(formData.get('accountId') ?? ''),
-      pageId: String(formData.get('pageId') ?? ''),
-      instagramBusinessAccountId: String(formData.get('instagramBusinessAccountId') ?? ''),
-      accessToken: String(formData.get('accessToken') ?? ''),
-      apiVersion: String(formData.get('apiVersion') ?? ''),
-      mode: String(formData.get('mode') ?? 'READ_ONLY'),
-    }),
-  });
-
-  revalidatePath('/[locale]/settings', 'page');
+  try {
+    await apiFetch(path, {
+      method: 'POST',
+      body: JSON.stringify({
+        connectionName: String(formData.get('connectionName') ?? ''),
+        connectionMethod: String(formData.get('connectionMethod') ?? ''),
+        shopDomain: String(formData.get('shopDomain') ?? ''),
+        clientId: String(formData.get('clientId') ?? ''),
+        clientSecret: String(formData.get('clientSecret') ?? ''),
+        adminAccessToken: String(formData.get('adminAccessToken') ?? ''),
+        accountId: String(formData.get('accountId') ?? ''),
+        pageId: String(formData.get('pageId') ?? ''),
+        instagramBusinessAccountId: String(formData.get('instagramBusinessAccountId') ?? ''),
+        accessToken: String(formData.get('accessToken') ?? ''),
+        apiVersion: String(formData.get('apiVersion') ?? ''),
+        mode: String(formData.get('mode') ?? 'READ_ONLY'),
+      }),
+    });
+    revalidatePath('/[locale]/settings', 'page');
+  } catch (error) {
+    redirect(settingsResultUrl(locale, 'error', provider, actionMessage(error)));
+  }
+  redirect(
+    settingsResultUrl(
+      locale,
+      'success',
+      provider,
+      provider === 'MES_COLIS'
+        ? 'Mes Colis token accepted and saved securely. Parcel access will be confirmed on the first barcode lookup.'
+        : `${providerLabel(provider)} connected and verified.`,
+    ),
+  );
 }
 
 async function selectMetaAccount(formData: FormData) {
@@ -195,8 +211,10 @@ async function syncAllIntegrations() {
 async function syncIntegration(formData: FormData) {
   'use server';
 
+  const locale = safeLocale(formData.get('locale'));
   const provider = String(formData.get('provider') ?? '');
   const dryRun = formData.get('dryRun') === 'true';
+  let successMessage = `${providerLabel(provider)} ${dryRun ? 'dry-run' : 'sync'} completed.`;
   try {
     if (provider === 'MES_COLIS') {
       if (!dryRun) {
@@ -204,52 +222,69 @@ async function syncIntegration(formData: FormData) {
       }
       revalidatePath('/[locale]/settings', 'page');
       revalidatePath('/[locale]/delivery', 'page');
-      return;
+      successMessage = 'Mes Colis linked barcodes refreshed. No external parcel data was changed.';
+    } else {
+      await apiFetch(
+        `/api/v1/integrations/${provider.toLowerCase().replaceAll('_', '-')}${dryRun ? '/dry-run' : '/sync'}`,
+        {
+          method: 'POST',
+          body: JSON.stringify({ dryRun }),
+        },
+      );
     }
-    await apiFetch(
-      `/api/v1/integrations/${provider.toLowerCase().replaceAll('_', '-')}${dryRun ? '/dry-run' : '/sync'}`,
-      {
-        method: 'POST',
-        body: JSON.stringify({ dryRun }),
-      },
-    );
-  } catch {
-    // Provider sync failures should be reported in the integration card, not as a route crash.
+  } catch (error) {
+    redirect(settingsResultUrl(locale, 'error', provider, actionMessage(error)));
   }
 
   revalidatePath('/[locale]/settings', 'page');
   revalidatePath('/[locale]/campaigns', 'page');
   revalidatePath('/[locale]/dashboard', 'page');
+  redirect(settingsResultUrl(locale, 'success', provider, successMessage));
 }
 
 async function testIntegration(formData: FormData) {
   'use server';
 
+  const locale = safeLocale(formData.get('locale'));
   const provider = String(formData.get('provider') ?? '');
   const path =
     provider === 'MES_COLIS'
       ? '/api/v1/integrations/mes-colis/test'
       : `/api/v1/integrations/${provider.toLowerCase().replaceAll('_', '-')}/test`;
-  await apiFetch(path, {
-    method: 'POST',
-  });
-
-  revalidatePath('/[locale]/settings', 'page');
+  try {
+    await apiFetch(path, { method: 'POST' });
+    revalidatePath('/[locale]/settings', 'page');
+  } catch (error) {
+    redirect(settingsResultUrl(locale, 'error', provider, actionMessage(error)));
+  }
+  redirect(
+    settingsResultUrl(
+      locale,
+      'success',
+      provider,
+      `${providerLabel(provider)} connection test passed.`,
+    ),
+  );
 }
 
 async function disconnectIntegration(formData: FormData) {
   'use server';
 
+  const locale = safeLocale(formData.get('locale'));
   const provider = String(formData.get('provider') ?? '');
   const path =
     provider === 'MES_COLIS'
       ? '/api/v1/integrations/mes-colis/disconnect'
       : `/api/v1/integrations/${provider.toLowerCase().replaceAll('_', '-')}/disconnect`;
-  await apiFetch(path, {
-    method: 'POST',
-  });
-
-  revalidatePath('/[locale]/settings', 'page');
+  try {
+    await apiFetch(path, { method: 'POST' });
+    revalidatePath('/[locale]/settings', 'page');
+  } catch (error) {
+    redirect(settingsResultUrl(locale, 'error', provider, actionMessage(error)));
+  }
+  redirect(
+    settingsResultUrl(locale, 'success', provider, `${providerLabel(provider)} disconnected.`),
+  );
 }
 
 async function repairWorkflows() {
@@ -264,8 +299,44 @@ async function repairWorkflows() {
   revalidatePath('/[locale]/fulfillment', 'page');
 }
 
-export default async function SettingsPage({ params }: { params: Promise<{ locale: string }> }) {
+function safeLocale(value: FormDataEntryValue | null) {
+  const locale = String(value ?? 'en');
+  return ['en', 'fr', 'ar'].includes(locale) ? locale : 'en';
+}
+
+function providerLabel(provider: string) {
+  return provider
+    .toLowerCase()
+    .replaceAll('_', ' ')
+    .replace(/\b\w/g, (letter) => letter.toUpperCase());
+}
+
+function settingsResultUrl(locale: string, result: string, provider: string, message: string) {
+  return `/${locale}/settings?result=${encodeURIComponent(result)}&provider=${encodeURIComponent(provider)}&message=${encodeURIComponent(message)}`;
+}
+
+function actionMessage(error: unknown) {
+  return error instanceof Error
+    ? error.message
+    : 'The integration action could not be completed. Try again.';
+}
+
+function firstQueryValue(value: string | string[] | undefined) {
+  return Array.isArray(value) ? value[0] : value;
+}
+
+export default async function SettingsPage({
+  params,
+  searchParams,
+}: {
+  params: Promise<{ locale: string }>;
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
+}) {
   const { locale } = await params;
+  const notice = await searchParams;
+  const noticeResult = firstQueryValue(notice.result);
+  const noticeMessage = firstQueryValue(notice.message);
+  const noticeProvider = firstQueryValue(notice.provider);
   const [
     organization,
     integrations,
@@ -306,6 +377,22 @@ export default async function SettingsPage({ params }: { params: Promise<{ local
         title="Settings"
         description="Manage workspace identity, operating currency, and connected workflow capabilities."
       />
+
+      {noticeMessage ? (
+        <div
+          className={`status-banner ${noticeResult === 'error' ? 'status-banner-warning' : ''}`}
+          role={noticeResult === 'error' ? 'alert' : 'status'}
+        >
+          <div>
+            <strong>
+              {noticeResult === 'error'
+                ? `${providerLabel(noticeProvider ?? 'integration')} needs attention`
+                : 'Integration action completed'}
+            </strong>
+            <p>{noticeMessage}</p>
+          </div>
+        </div>
+      ) : null}
 
       <section className="stats-grid" aria-label="Settings summary">
         <MetricCard
@@ -526,6 +613,7 @@ export default async function SettingsPage({ params }: { params: Promise<{ local
                 </p>
                 {isExternal ? (
                   <form action={connectIntegration} className="form-grid compact-form">
+                    <input name="locale" type="hidden" value={locale} />
                     <input name="provider" type="hidden" value={integration.provider} />
                     <input name="mode" type="hidden" value="READ_ONLY" />
                     {integration.provider === 'SHOPIFY' ? (
@@ -660,68 +748,83 @@ export default async function SettingsPage({ params }: { params: Promise<{ local
                       </label>
                     ) : null}
                     <div className="form-actions">
-                      <button className="button button-secondary" type="submit">
+                      <FormSubmitButton
+                        className="button button-secondary"
+                        pendingLabel="Connecting..."
+                        type="submit"
+                      >
                         {['SHOPIFY', 'META_ADS', 'MES_COLIS'].includes(integration.provider)
                           ? 'Connect & test'
                           : 'Save connection'}
-                      </button>
+                      </FormSubmitButton>
                     </div>
                   </form>
                 ) : null}
                 <div className="button-row">
                   {isExternal ? (
                     <form action={testIntegration}>
+                      <input name="locale" type="hidden" value={locale} />
                       <input name="provider" type="hidden" value={integration.provider} />
-                      <button
+                      <FormSubmitButton
                         className="button button-secondary"
-                        type="submit"
                         disabled={integration.status !== 'CONNECTED'}
+                        pendingLabel="Testing..."
                         title={
                           integration.status !== 'CONNECTED'
                             ? `Connect ${integration.label} before testing.`
                             : undefined
                         }
+                        type="submit"
                       >
                         Test
-                      </button>
+                      </FormSubmitButton>
                     </form>
                   ) : null}
                   {integration.provider !== 'MES_COLIS' ? (
                     <form action={syncIntegration}>
+                      <input name="locale" type="hidden" value={locale} />
                       <input name="provider" type="hidden" value={integration.provider} />
                       <input name="dryRun" type="hidden" value="true" />
-                      <button
+                      <FormSubmitButton
                         className="button button-secondary"
-                        type="submit"
                         disabled={isExternal && integration.status !== 'CONNECTED'}
+                        pendingLabel="Preparing..."
+                        type="submit"
                       >
                         Dry-run sync
-                      </button>
+                      </FormSubmitButton>
                     </form>
                   ) : null}
                   <form action={syncIntegration}>
+                    <input name="locale" type="hidden" value={locale} />
                     <input name="provider" type="hidden" value={integration.provider} />
                     <input name="dryRun" type="hidden" value="false" />
-                    <button
+                    <FormSubmitButton
                       className="button button-primary"
-                      type="submit"
                       disabled={isExternal && integration.status !== 'CONNECTED'}
+                      pendingLabel="Syncing..."
                       title={
                         isExternal && integration.status !== 'CONNECTED'
                           ? `Connect ${integration.label} before syncing.`
                           : undefined
                       }
+                      type="submit"
                     >
                       Sync now
-                    </button>
+                    </FormSubmitButton>
                   </form>
                   {['SHOPIFY', 'MES_COLIS'].includes(integration.provider) &&
                   integration.status === 'CONNECTED' ? (
                     <form action={disconnectIntegration}>
+                      <input name="locale" type="hidden" value={locale} />
                       <input name="provider" type="hidden" value={integration.provider} />
-                      <button className="button button-secondary" type="submit">
+                      <FormSubmitButton
+                        className="button button-secondary"
+                        pendingLabel="Disconnecting..."
+                        type="submit"
+                      >
                         Disconnect
-                      </button>
+                      </FormSubmitButton>
                     </form>
                   ) : null}
                 </div>

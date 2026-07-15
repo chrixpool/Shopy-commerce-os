@@ -16,6 +16,7 @@ const {
 } = require('../apps/api/dist/modules/workflows/workflow-transitions.js');
 const { reconciliationResult } = require('../apps/api/dist/modules/workflows/workflows.service.js');
 const {
+  classifyMesColisConnectionResponse,
   MES_COLIS_STATUSES,
   normalizeMesColisStatus,
 } = require('../apps/api/dist/modules/integrations/mes-colis.service.js');
@@ -76,6 +77,17 @@ for (const status of MES_COLIS_STATUSES) {
   assert.notEqual(normalizeMesColisStatus(status), 'NEEDS_REVIEW');
 }
 assert.equal(normalizeMesColisStatus('future-provider-status'), 'NEEDS_REVIEW');
+assert.deepEqual(classifyMesColisConnectionResponse(501, {}), {
+  ok: false,
+  verification: 'REJECTED',
+  message: 'Mes Colis rejected this access token. Reconnect with a valid token.',
+});
+assert.equal(
+  classifyMesColisConnectionResponse(403, { error: 'ORDER_NOT_FOUND' }).ok,
+  true,
+);
+assert.equal(classifyMesColisConnectionResponse(403, {}).verification, 'TOKEN_ACCEPTED');
+assert.equal(classifyMesColisConnectionResponse(503, {}).verification, 'UNAVAILABLE');
 
 process.env.INTEGRATION_SECRET_KEY = 'test-only-integration-key';
 const secrets = new IntegrationSecretsService();
