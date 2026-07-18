@@ -21,12 +21,17 @@ export function IntegrationActionForm({ action, children, className }: Integrati
   const [state, formAction] = useActionState(action, INITIAL_ACTION_STATE);
 
   return (
-    <form action={formAction} className={className}>
+    <form
+      action={formAction}
+      className={className}
+      aria-busy={state.status === 'idle' ? undefined : false}
+    >
       {children}
       {state.message ? (
         <p
           className={`integration-action-message ${state.status === 'error' ? 'form-error' : 'form-status'}`}
           role={state.status === 'error' ? 'alert' : 'status'}
+          aria-live={state.status === 'error' ? 'assertive' : 'polite'}
         >
           {state.message}
         </p>

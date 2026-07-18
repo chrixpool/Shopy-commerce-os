@@ -1,6 +1,7 @@
 import Link from 'next/link';
 import { revalidatePath } from 'next/cache';
 import { EmptyState, MetricCard, PageHeader } from '@/components/ui/page';
+import { FormSubmitButton } from '@/components/ui/form-submit-button';
 import { apiFetch, getWorkspaceSettings } from '@/lib/api';
 import { formatMoney } from '@/lib/currency';
 
@@ -104,7 +105,8 @@ export default async function FulfillmentPage({ params }: { params: Promise<{ lo
         />
       ) : (
         <div className="table-wrap">
-          <table className="data-table">
+          <table className="data-table data-table-mobile">
+            <caption className="sr-only">Fulfillment work queue</caption>
             <thead>
               <tr>
                 <th>Order</th>
@@ -119,48 +121,53 @@ export default async function FulfillmentPage({ params }: { params: Promise<{ lo
             <tbody>
               {tasks.map((task) => (
                 <tr key={task.id}>
-                  <td className="strong-cell">
+                  <td className="strong-cell" data-label="Order">
                     <Link href={`/${locale}/orders/${task.order.id}`} prefetch={false}>
                       {task.order.orderNumber}
                     </Link>
                   </td>
-                  <td>
+                  <td data-label="Customer">
                     <div className="strong-cell">{task.order.customerName}</div>
                     <div>{task.order.customerPhone}</div>
                   </td>
-                  <td>
+                  <td data-label="Items">
                     {task.order.items.map((item) => `${item.quantity}x ${item.name}`).join(', ')}
                   </td>
-                  <td>{formatMoney(task.order.totalAmount, workspace.baseCurrency, locale)}</td>
-                  <td>
+                  <td data-label="Value">
+                    {formatMoney(task.order.totalAmount, workspace.baseCurrency, locale)}
+                  </td>
+                  <td data-label="Stock">
                     {task.order.items.map((item) => (
                       <div key={item.id}>
-                        {item.product?.sku ?? item.name}: {item.product?.stock ?? 'n/a'}
+                        {item.product?.sku ?? item.name}:{' '}
+                        {item.product?.stock ?? 'Unavailable - product mapping needed'}
                       </div>
                     ))}
                   </td>
-                  <td>
+                  <td data-label="Status">
                     <span className="badge badge-muted">{task.status}</span>
                   </td>
-                  <td>
+                  <td data-label="Action">
                     <form action={updateFulfillment} className="inline-form">
                       <input name="id" type="hidden" value={task.id} />
-                      <button
+                      <FormSubmitButton
                         className="button button-secondary"
                         name="status"
+                        pendingLabel="Saving..."
                         value="PACKING"
                         type="submit"
                       >
                         Start packing
-                      </button>
-                      <button
+                      </FormSubmitButton>
+                      <FormSubmitButton
                         className="button button-primary"
                         name="status"
+                        pendingLabel="Saving..."
                         value="PACKED"
                         type="submit"
                       >
                         Mark packed
-                      </button>
+                      </FormSubmitButton>
                     </form>
                   </td>
                 </tr>

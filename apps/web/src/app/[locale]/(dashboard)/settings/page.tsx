@@ -4,7 +4,14 @@ import {
   IntegrationActionForm,
   type FormActionState,
 } from '@/components/ui/form-submit-button';
-import { MetricCard, PageHeader, StatusBadge, SurfaceCard } from '@/components/ui/page';
+import {
+  IntegrationHealthBadge,
+  MetricCard,
+  PageHeader,
+  StatusBadge,
+  SurfaceCard,
+  integrationHealthState,
+} from '@/components/ui/page';
 import { apiFetch } from '@/lib/api';
 import { formatMoney, SUPPORTED_CURRENCIES } from '@/lib/currency';
 
@@ -513,7 +520,11 @@ export default async function SettingsPage({ params }: { params: Promise<{ local
               {latestSyncAll.providers.map((provider) => (
                 <div key={provider.provider}>
                   <span className="metric-label">{provider.provider.replaceAll('_', ' ')}</span>
-                  <strong>{provider.status}</strong>
+                  <strong>
+                    <IntegrationHealthBadge
+                      state={integrationHealthState({ status: provider.status })}
+                    />
+                  </strong>
                   <small>
                     {provider.created} created · {provider.updated} updated · {provider.skipped}{' '}
                     skipped
@@ -548,6 +559,23 @@ export default async function SettingsPage({ params }: { params: Promise<{ local
                 }
               | undefined;
             const shop = integration.config?.shop as Record<string, unknown> | undefined;
+            const warningCount =
+              scopeWarnings.length + Number(integration.config?.warningCount ?? 0);
+            const health = integrationHealthState({
+              status: integration.status,
+              warningCount,
+              lastSyncAt: integration.lastSuccessfulSyncAt ?? integration.lastSyncAt,
+            });
+            const nextAction =
+              health === 'healthy'
+                ? 'No action required'
+                : health === 'stale'
+                  ? 'Run a new read-only sync'
+                  : health === 'partial'
+                    ? 'Review warnings before relying on all provider data'
+                    : health === 'error'
+                      ? 'Test the connection or reconnect credentials'
+                      : 'Add credentials and test the connection';
             return (
               <div className="queue-card" key={integration.provider}>
                 <div className="queue-card-header">
@@ -557,9 +585,15 @@ export default async function SettingsPage({ params }: { params: Promise<{ local
                       {integration.mode.replaceAll('_', ' ').toLowerCase()} mode
                     </p>
                   </div>
-                  <StatusBadge tone={integration.status === 'CONNECTED' ? 'success' : 'muted'}>
-                    {integration.status.replaceAll('_', ' ')}
-                  </StatusBadge>
+                  <IntegrationHealthBadge state={health} />
+                </div>
+                <div
+                  className="integration-health-context"
+                  aria-label={`${integration.label} health details`}
+                >
+                  <span>Affected data: {integration.label} imports and reporting</span>
+                  <span>Warnings: {warningCount}</span>
+                  <strong>Next action: {nextAction}</strong>
                 </div>
                 <p className="section-description">
                   {integration.provider === 'SHOPIFY'
@@ -607,6 +641,7 @@ export default async function SettingsPage({ params }: { params: Promise<{ local
                             name="shopDomain"
                             placeholder="your-store.myshopify.com"
                             defaultValue={String(integration.config?.shopDomain ?? '')}
+                            required
                           />
                         </label>
                         <label className="form-field">
@@ -616,6 +651,7 @@ export default async function SettingsPage({ params }: { params: Promise<{ local
                             name="apiVersion"
                             placeholder="2026-01"
                             defaultValue={String(integration.config?.apiVersion ?? '2026-01')}
+                            required
                           />
                         </label>
                         <label className="form-field">
@@ -710,6 +746,8 @@ export default async function SettingsPage({ params }: { params: Promise<{ local
                               : 'Paste access token'
                           }
                           type="password"
+                          autoComplete="off"
+                          required={integration.status !== 'CONNECTED'}
                         />
                       </label>
                     ) : null}
@@ -755,6 +793,11 @@ export default async function SettingsPage({ params }: { params: Promise<{ local
                         className="button button-secondary"
                         disabled={isExternal && integration.status !== 'CONNECTED'}
                         pendingLabel="Preparing..."
+                        title={
+                          isExternal && integration.status !== 'CONNECTED'
+                            ? `Connect ${integration.label} before preparing a dry-run.`
+                            : undefined
+                        }
                         type="submit"
                       >
                         Dry-run sync
@@ -1056,6 +1099,12 @@ export default async function SettingsPage({ params }: { params: Promise<{ local
                 disabled={
                   !reconciliation.missingConfirmationTasks &&
                   !reconciliation.missingFulfillmentTasks
+                }
+                title={
+                  !reconciliation.missingConfirmationTasks &&
+                  !reconciliation.missingFulfillmentTasks
+                    ? 'No missing workflow tasks need repair.'
+                    : 'Create only the missing internal workflow tasks.'
                 }
               >
                 Repair missing tasks

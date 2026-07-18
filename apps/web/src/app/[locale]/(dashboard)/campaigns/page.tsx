@@ -1,5 +1,14 @@
 import { revalidatePath } from 'next/cache';
-import { EmptyState, MetricCard, PageHeader, StatusBadge, SurfaceCard } from '@/components/ui/page';
+import {
+  DataTrustStrip,
+  EmptyState,
+  IntegrationHealthBadge,
+  MetricCard,
+  PageHeader,
+  StatusBadge,
+  SurfaceCard,
+  integrationHealthState,
+} from '@/components/ui/page';
 import { apiFetch } from '@/lib/api';
 import { formatMoney } from '@/lib/currency';
 
@@ -93,6 +102,7 @@ export default async function CampaignsPage({ params }: { params: Promise<{ loca
   const reportingCurrency = String(metaAccount?.currency ?? settings.baseCurrency);
   const facebook = integrations.find((integration) => integration.provider === 'FACEBOOK_PAGE');
   const instagram = integrations.find((integration) => integration.provider === 'INSTAGRAM');
+  const metaConnected = meta?.status === 'CONNECTED';
 
   return (
     <div className="page-stack">
@@ -109,24 +119,58 @@ export default async function CampaignsPage({ params }: { params: Promise<{ loca
         }
       />
 
+      <DataTrustStrip
+        label="Marketing data trust"
+        items={[
+          {
+            label: 'Source',
+            value: summary.metricSource || 'Meta Ads',
+            detail: 'Provider-reported; not Shopy attribution',
+            state: metaConnected ? 'confirmed' : 'unavailable',
+          },
+          {
+            label: 'Reporting scope',
+            value: metaConnected ? summary.dateRange : 'Unavailable',
+            detail: 'Attribution windows may differ from Shopify',
+            state: metaConnected ? 'confirmed' : 'unavailable',
+          },
+          {
+            label: 'Currency',
+            value: metaConnected ? reportingCurrency : 'Unavailable',
+            detail: 'Meta account currency',
+            state: metaConnected ? 'confirmed' : 'unavailable',
+          },
+          {
+            label: 'Connection',
+            value: (
+              <IntegrationHealthBadge state={integrationHealthState({ status: meta?.status })} />
+            ),
+            detail: 'Read-only; no budget changes',
+            state: metaConnected ? 'confirmed' : 'unavailable',
+          },
+        ]}
+      />
+
       <section className="stats-grid" aria-label="Marketing summary">
         <MetricCard
           label="Spend"
-          value={formatMoney(summary.spend, reportingCurrency, locale)}
+          value={
+            metaConnected ? formatMoney(summary.spend, reportingCurrency, locale) : 'Unavailable'
+          }
           help="Latest synced Meta spend. No budgets are changed."
           badge="Read-only"
           badgeTone="info"
         />
         <MetricCard
           label="Impressions"
-          value={summary.impressions.toLocaleString(locale)}
+          value={metaConnected ? summary.impressions.toLocaleString(locale) : 'Unavailable'}
           help={`${summary.metricSource} · ${summary.dateRange}`}
           badge="Reported"
           badgeTone="muted"
         />
         <MetricCard
           label="Campaigns"
-          value={String(summary.campaigns)}
+          value={metaConnected ? String(summary.campaigns) : 'Unavailable'}
           help="Campaign records currently available."
           badge={meta?.status ?? 'DISCONNECTED'}
           badgeTone={meta?.status === 'CONNECTED' ? 'success' : 'muted'}
@@ -186,15 +230,11 @@ export default async function CampaignsPage({ params }: { params: Promise<{ loca
                 <div>
                   <p className="step-title">{String(label)}</p>
                   <p className="step-copy">
-                    <StatusBadge
-                      tone={
-                        (integration as { status?: string } | undefined)?.status === 'CONNECTED'
-                          ? 'success'
-                          : 'muted'
-                      }
-                    >
-                      {(integration as { status?: string } | undefined)?.status ?? 'DISCONNECTED'}
-                    </StatusBadge>{' '}
+                    <IntegrationHealthBadge
+                      state={integrationHealthState({
+                        status: (integration as { status?: string } | undefined)?.status,
+                      })}
+                    />{' '}
                     Read-only and draft-first. Shopy will not launch ads, edit budgets, or publish
                     posts.
                   </p>

@@ -60,7 +60,33 @@ body {
 }
 
 .sr-only {
-  display: none !important;
+  position: absolute !important;
+  width: 1px !important;
+  height: 1px !important;
+  padding: 0 !important;
+  margin: -1px !important;
+  overflow: hidden !important;
+  clip: rect(0, 0, 0, 0) !important;
+  white-space: nowrap !important;
+  border: 0 !important;
+}
+
+.skip-link {
+  position: fixed;
+  inset-block-start: 10px;
+  inset-inline-start: 10px;
+  z-index: 1000;
+  padding: 10px 14px;
+  border-radius: 6px;
+  background: var(--text-1);
+  color: var(--text-inverse);
+  font-weight: 750;
+  transform: translateY(-150%);
+  transition: transform 120ms ease;
+}
+
+.skip-link:focus {
+  transform: translateY(0);
 }
 
 .metric-card-link {
@@ -90,6 +116,82 @@ body {
   color: var(--text-muted, #64748b);
 }
 
+.trust-strip {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  box-shadow: var(--shadow-sm);
+}
+
+.trust-item {
+  display: grid;
+  min-width: 0;
+  gap: 3px;
+  padding: 12px 14px;
+  border-inline-end: 1px solid var(--border);
+}
+
+.trust-item:last-child {
+  border-inline-end: 0;
+}
+
+.trust-label {
+  color: var(--text-3);
+  font-size: 10px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.trust-item strong {
+  overflow: hidden;
+  color: var(--text-1);
+  font-size: 13px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.trust-item small {
+  color: var(--text-3);
+  font-size: 10px;
+}
+
+.trust-state {
+  display: inline-flex;
+  width: fit-content;
+  align-items: center;
+  gap: 5px;
+  color: var(--text-2);
+  font-size: 10px;
+  font-weight: 720;
+  text-transform: capitalize;
+}
+
+.status-symbol {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  flex: 0 0 7px;
+  border: 1px solid currentColor;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+.trust-state-partial,
+.trust-state-stale {
+  color: var(--warning);
+}
+
+.trust-state-unavailable {
+  color: var(--danger);
+}
+
+.trust-state-confirmed {
+  color: var(--success);
+}
+
 @media (max-width: 640px) {
   .status-banner {
     align-items: flex-start;
@@ -110,8 +212,13 @@ a {
 }
 
 :focus-visible {
-  outline: 3px solid rgba(37, 99, 235, 0.35);
+  outline: 3px solid #2563eb;
   outline-offset: 2px;
+}
+
+[aria-disabled='true'],
+:disabled {
+  cursor: not-allowed;
 }
 
 ::-webkit-scrollbar {
@@ -2378,6 +2485,22 @@ body {
   background: var(--surface-soft);
 }
 
+.integration-health-context {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 14px;
+  margin-top: 10px;
+  padding: 9px 10px;
+  border-inline-start: 3px solid var(--border-strong);
+  background: var(--surface-soft);
+  color: var(--text-2);
+  font-size: 10px;
+}
+
+.integration-health-context strong {
+  color: var(--text-1);
+}
+
 .sync-center small,
 .integration-diagnostics small {
   display: block;
@@ -2453,5 +2576,63 @@ body {
   }
   .business-alert-action {
     grid-column: 2;
+  }
+
+  .button,
+  .field,
+  .select-field,
+  .nav-link,
+  summary {
+    min-height: 44px;
+  }
+
+  .trust-strip {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .trust-item:nth-child(2n) {
+    border-inline-end: 0;
+  }
+
+  .data-table-mobile {
+    min-width: 0;
+  }
+
+  .data-table-mobile thead {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+  }
+
+  .data-table-mobile,
+  .data-table-mobile tbody,
+  .data-table-mobile tr,
+  .data-table-mobile td {
+    display: block;
+    width: 100%;
+  }
+
+  .data-table-mobile tr {
+    padding: 10px 12px;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .data-table-mobile td {
+    display: grid;
+    grid-template-columns: minmax(88px, 0.45fr) minmax(0, 1fr);
+    gap: 10px;
+    padding: 7px 0;
+    border: 0;
+    overflow-wrap: anywhere;
+  }
+
+  .data-table-mobile td::before {
+    content: attr(data-label);
+    color: var(--text-3);
+    font-size: 10px;
+    font-weight: 800;
+    text-transform: uppercase;
   }
 }

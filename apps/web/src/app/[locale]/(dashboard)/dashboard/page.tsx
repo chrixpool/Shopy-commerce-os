@@ -2,12 +2,15 @@ import { getTranslations } from 'next-intl/server';
 import Link from 'next/link';
 import { revalidatePath } from 'next/cache';
 import {
+  DataTrustStrip,
   EmptyState,
+  IntegrationHealthBadge,
   MetricCard,
   PageHeader,
   SectionHeader,
   StatusBadge,
   SurfaceCard,
+  integrationHealthState,
 } from '@/components/ui/page';
 import { WorkspaceRecovery } from '@/components/ui/workspace-recovery';
 import { apiFetch, apiFetchState } from '@/lib/api';
@@ -180,6 +183,17 @@ export default async function DashboardPage({
     ? lastShopifySuccess.outputSnapshot.warnings.map(String)
     : [];
   const meta = integrations.find((integration) => integration.provider === 'META_ADS');
+  const mesColis = integrations.find((integration) => integration.provider === 'MES_COLIS');
+  const totalCostingOrders =
+    (summary.finance?.costedOrders ?? 0) + (summary.finance?.ordersMissingCost ?? 0);
+  const costingCompleteness = totalCostingOrders
+    ? Math.round(((summary.finance?.costedOrders ?? 0) / totalCostingOrders) * 100)
+    : null;
+  const shopifyHealth = integrationHealthState({
+    status: shopify?.status,
+    warningCount: shopifyWarnings.length,
+    lastSyncAt: shopify?.lastSyncAt,
+  });
   const alerts = [
     summary.workQueues.pendingConfirmation
       ? {
@@ -289,6 +303,42 @@ export default async function DashboardPage({
       />
 
       <WorkspaceRecovery active={criticalUnavailable} message={summaryResult.message} />
+
+      <DataTrustStrip
+        items={[
+          {
+            label: 'Order source',
+            value: shopifyTotals?.orders == null ? 'Unavailable' : String(shopifyTotals.orders),
+            detail: 'Latest Shopify sync total',
+            state: shopifyRunsResult.state === 'ready' ? 'confirmed' : 'unavailable',
+          },
+          {
+            label: 'Freshness',
+            value: lastShopifySuccess
+              ? new Date(lastShopifySuccess.startedAt).toLocaleString(locale)
+              : 'Not synced yet',
+            detail: 'Last successful Shopify sync',
+            state:
+              shopifyHealth === 'stale'
+                ? 'stale'
+                : shopifyHealth === 'healthy'
+                  ? 'confirmed'
+                  : 'partial',
+          },
+          {
+            label: 'Cost completeness',
+            value: costingCompleteness == null ? 'Unavailable' : `${costingCompleteness}%`,
+            detail: `${summary.finance?.ordersMissingCost ?? 0} order(s) incomplete`,
+            state: costingCompleteness === 100 ? 'confirmed' : 'partial',
+          },
+          {
+            label: 'Workspace currency',
+            value: workspace.baseCurrency,
+            detail: 'No automatic FX conversion',
+            state: workspaceResult.state === 'ready' ? 'confirmed' : 'unavailable',
+          },
+        ]}
+      />
 
       <form className="toolbar" action={`/${locale}/dashboard`}>
         <label className="form-field compact-select">
@@ -440,10 +490,18 @@ export default async function DashboardPage({
         />
         <MetricCard
           label="Gross margin"
-          value={formatMoney(costing.grossMargin, workspace.baseCurrency, locale)}
-          help={`${Math.round(costing.grossMarginPercent * 1000) / 10}% after product cost snapshots.`}
-          badge={costing.productsMissingCost ? 'Costs needed' : 'Costed'}
-          badgeTone={costing.productsMissingCost ? 'warning' : 'success'}
+          value={
+            (summary.finance?.costedOrders ?? 0) > 0
+              ? formatMoney(costing.grossMargin, workspace.baseCurrency, locale)
+              : 'Unavailable'
+          }
+          help={
+            summary.finance?.ordersMissingCost
+              ? `Known margin only; ${summary.finance.ordersMissingCost} order(s) remain incomplete.`
+              : `${Math.round(costing.grossMarginPercent * 1000) / 10}% after product cost snapshots.`
+          }
+          badge={summary.finance?.ordersMissingCost ? 'Incomplete' : 'Known'}
+          badgeTone={summary.finance?.ordersMissingCost ? 'warning' : 'success'}
           href={`/${locale}/factory`}
         />
       </section>
@@ -642,19 +700,36 @@ export default async function DashboardPage({
             }
           />
           <div className="snapshot-grid" style={{ marginTop: 16 }}>
-            {[shopify, meta].map((integration) => (
-              <div key={integration?.provider ?? 'provider'}>
-                <span className="metric-label">
-                  {integration?.provider?.replaceAll('_', ' ') ?? 'Provider'}
-                </span>
-                <strong>{integration?.status ?? 'DISCONNECTED'}</strong>
-                <small>
-                  {integration?.lastSyncAt
-                    ? `Last sync ${new Date(integration.lastSyncAt).toLocaleString(locale)}`
-                    : 'Not synced yet'}
-                </small>
-              </div>
-            ))}
+            {[shopify, mesColis, meta].map((integration, index) => {
+              const warningCount =
+                integration?.provider === 'SHOPIFY'
+                  ? shopifyWarnings.length
+                  : Number(integration?.config?.warningCount ?? 0);
+              const health = integrationHealthState({
+                status: integration?.status,
+                warningCount,
+                lastSyncAt: integration?.lastSyncAt,
+              });
+              return (
+                <div key={integration?.provider ?? `provider-${index}`}>
+                  <span className="metric-label">
+                    {integration?.provider?.replaceAll('_', ' ') ??
+                      ['Shopify', 'Mes Colis', 'Meta Ads'][index]}
+                  </span>
+                  <strong>
+                    <IntegrationHealthBadge state={health} />
+                  </strong>
+                  <small>
+                    {integration?.lastSyncAt
+                      ? `Last sync ${new Date(integration.lastSyncAt).toLocaleString(locale)}`
+                      : 'No successful sync recorded'}
+                  </small>
+                  {warningCount ? (
+                    <small>{warningCount} warning(s) affect provider data</small>
+                  ) : null}
+                </div>
+              );
+            })}
           </div>
           {latestSyncAll ? (
             <div className="status-banner" style={{ marginTop: 14 }}>
@@ -688,27 +763,23 @@ export default async function DashboardPage({
             title="Shopify trust status"
             description="Latest read-only import signal from the connected store."
             actions={
-              <StatusBadge
-                tone={
-                  !integrationsUnavailable && shopify?.status === 'CONNECTED'
-                    ? 'success'
-                    : 'warning'
-                }
-              >
-                {integrationsUnavailable ? 'REFRESHING' : (shopify?.status ?? 'DISCONNECTED')}
-              </StatusBadge>
+              integrationsUnavailable ? (
+                <StatusBadge tone="warning">Refreshing</StatusBadge>
+              ) : (
+                <IntegrationHealthBadge state={shopifyHealth} />
+              )
             }
           />
           <div className="snapshot-grid" style={{ marginTop: 16 }}>
             <div>
               <span className="metric-label">Connected shop</span>
               <strong>
-                {String(
-                  ((shopify?.config?.shop as Record<string, unknown> | undefined)?.name ??
-                    integrationsUnavailable)
-                    ? 'Temporarily unavailable'
-                    : 'Not connected',
-                )}
+                {integrationsUnavailable
+                  ? 'Temporarily unavailable'
+                  : String(
+                      (shopify?.config?.shop as Record<string, unknown> | undefined)?.name ??
+                        'Not connected',
+                    )}
               </strong>
             </div>
             <div>
@@ -739,9 +810,13 @@ export default async function DashboardPage({
                 <div>
                   <p className="step-title">{integration.provider.replaceAll('_', ' ')}</p>
                   <p className="step-copy">
-                    <StatusBadge tone={integration.status === 'CONNECTED' ? 'success' : 'muted'}>
-                      {integration.status.replaceAll('_', ' ')}
-                    </StatusBadge>{' '}
+                    <IntegrationHealthBadge
+                      state={integrationHealthState({
+                        status: integration.status,
+                        warningCount: Number(integration.config?.warningCount ?? 0),
+                        lastSyncAt: integration.lastSyncAt,
+                      })}
+                    />{' '}
                     {integration.mode.replaceAll('_', ' ').toLowerCase()}
                   </p>
                 </div>

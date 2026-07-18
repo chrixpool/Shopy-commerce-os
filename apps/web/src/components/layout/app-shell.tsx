@@ -18,6 +18,9 @@ export function AppShell({
 
   return (
     <div className={`app-shell${isSidebarExpanded ? ' sidebar-expanded' : ''}`}>
+      <a className="skip-link" href="#main-content">
+        Skip to main content
+      </a>
       <Sidebar locale={locale} isExpanded={isSidebarExpanded} />
       <div className="app-main">
         <Topbar
@@ -25,7 +28,7 @@ export function AppShell({
           locale={locale}
           onMenuClick={() => setIsSidebarExpanded((value) => !value)}
         />
-        <main className="content-area">
+        <main className="content-area" id="main-content" tabIndex={-1}>
           <div className="content-inner">{children}</div>
         </main>
       </div>

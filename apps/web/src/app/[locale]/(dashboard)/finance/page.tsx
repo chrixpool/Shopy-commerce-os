@@ -1,5 +1,6 @@
 import Link from 'next/link';
 import {
+  DataTrustStrip,
   EmptyState,
   MetricCard,
   PageHeader,
@@ -147,7 +148,7 @@ export default async function FinancePage({
   const completeness =
     Number(costing.totalProducts ?? 0) > 0
       ? Math.round((Number(costing.costedProducts ?? 0) / Number(costing.totalProducts)) * 100)
-      : 0;
+      : null;
   const recentFinancialOrders = orders.data.slice(0, 8);
 
   return (
@@ -161,6 +162,34 @@ export default async function FinancePage({
             Review orders
           </Link>
         }
+      />
+
+      <DataTrustStrip
+        label="Finance data trust"
+        items={[
+          {
+            label: 'Source',
+            value: 'Shopy orders and cost snapshots',
+            detail: `${orderSummary.totalOrders} order(s) in period`,
+          },
+          {
+            label: 'Completeness',
+            value: completeness == null ? 'Unavailable' : `${completeness}%`,
+            detail: `${costing.ordersMissingCost ?? 0} order(s) missing cost`,
+            state: completeness === 100 ? 'confirmed' : 'partial',
+          },
+          {
+            label: 'Currency',
+            value: workspace.baseCurrency,
+            detail: 'Workspace currency; no FX conversion',
+          },
+          {
+            label: 'Margin scope',
+            value: costing.ordersMissingCost ? 'Known orders only' : 'Complete period',
+            detail: 'Missing cost is never treated as zero',
+            state: costing.ordersMissingCost ? 'partial' : 'confirmed',
+          },
+        ]}
       />
 
       <form className="toolbar" action={`/${locale}/finance`}>
@@ -196,7 +225,11 @@ export default async function FinancePage({
         />
         <MetricCard
           label="Average order value"
-          value={formatMoney(averageOrderValue, workspace.baseCurrency, locale)}
+          value={
+            recognizedOrders
+              ? formatMoney(averageOrderValue, workspace.baseCurrency, locale)
+              : 'Unavailable'
+          }
           help="Revenue divided by total orders."
           badge="AOV"
           badgeTone="muted"
@@ -217,7 +250,7 @@ export default async function FinancePage({
         />
         <MetricCard
           label="Cost completeness"
-          value={`${completeness}%`}
+          value={completeness == null ? 'Unavailable' : `${completeness}%`}
           help={`${costing.productsMissingCost} product(s) still missing unit costs.`}
           badge={costing.productsMissingCost ? 'Action' : 'Ready'}
           badgeTone={costing.productsMissingCost ? 'warning' : 'success'}

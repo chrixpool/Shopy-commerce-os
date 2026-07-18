@@ -97,6 +97,94 @@ export function StatusBadge({
   return <span className={`badge badge-${tone}`}>{children}</span>;
 }
 
+export type IntegrationHealthState =
+  'healthy' | 'partial' | 'stale' | 'error' | 'not-connected' | 'needs-credentials' | 'skipped';
+
+const INTEGRATION_HEALTH: Record<
+  IntegrationHealthState,
+  { label: string; tone: 'success' | 'warning' | 'danger' | 'muted' | 'info' }
+> = {
+  healthy: { label: 'Healthy', tone: 'success' },
+  partial: { label: 'Partial', tone: 'warning' },
+  stale: { label: 'Stale', tone: 'warning' },
+  error: { label: 'Error', tone: 'danger' },
+  'not-connected': { label: 'Not connected', tone: 'muted' },
+  'needs-credentials': { label: 'Needs credentials', tone: 'warning' },
+  skipped: { label: 'Skipped', tone: 'info' },
+};
+
+export function integrationHealthState({
+  status,
+  warningCount = 0,
+  lastSyncAt,
+  staleAfterHours = 24,
+}: {
+  status?: string | null;
+  warningCount?: number;
+  lastSyncAt?: string | null;
+  staleAfterHours?: number;
+}): IntegrationHealthState {
+  const normalized = status?.toUpperCase();
+  if (!normalized || normalized === 'DISCONNECTED') return 'not-connected';
+  if (normalized === 'CONNECTING' || normalized === 'NEEDS_CREDENTIALS') {
+    return 'needs-credentials';
+  }
+  if (normalized === 'ERROR' || normalized === 'FAILED') return 'error';
+  if (normalized === 'PARTIAL' || normalized === 'QUEUED' || normalized === 'SYNCING') {
+    return 'partial';
+  }
+  if (normalized === 'STALE') return 'stale';
+  if (normalized === 'DISABLED' || normalized === 'SKIPPED') return 'skipped';
+  if (warningCount > 0) return 'partial';
+  if (
+    lastSyncAt &&
+    Date.now() - new Date(lastSyncAt).getTime() > staleAfterHours * 60 * 60 * 1000
+  ) {
+    return 'stale';
+  }
+  if (normalized === 'CONNECTED' && !lastSyncAt) return 'partial';
+  return normalized === 'CONNECTED' || normalized === 'SUCCESS' ? 'healthy' : 'not-connected';
+}
+
+export function IntegrationHealthBadge({ state }: { state: IntegrationHealthState }) {
+  const health = INTEGRATION_HEALTH[state];
+  return (
+    <StatusBadge tone={health.tone}>
+      <span className="status-symbol" aria-hidden="true" />
+      {health.label}
+    </StatusBadge>
+  );
+}
+
+export function DataTrustStrip({
+  items,
+  label = 'Data trust',
+}: {
+  items: Array<{
+    label: string;
+    value?: ReactNode;
+    detail?: string;
+    state?: 'confirmed' | 'partial' | 'stale' | 'unavailable';
+  }>;
+  label?: string;
+}) {
+  return (
+    <section className="trust-strip" aria-label={label}>
+      {items.map((item) => (
+        <div className="trust-item" key={item.label}>
+          <span className="trust-label">{item.label}</span>
+          <strong>{item.value ?? 'Unavailable'}</strong>
+          {item.detail ? <small>{item.detail}</small> : null}
+          <span className={`trust-state trust-state-${item.state ?? 'confirmed'}`}>
+            <span className="status-symbol" aria-hidden="true" />
+            {(item.state ?? 'confirmed').replace('-', ' ')}
+          </span>
+        </div>
+      ))}
+    </section>
+  );
+}
+
 export function BusinessAlert({
   title,
   description,

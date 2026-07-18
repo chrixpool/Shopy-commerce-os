@@ -160,11 +160,12 @@ export default async function InventoryPage({ params }: { params: Promise<{ loca
         <EmptyState
           icon="IN"
           title="No products"
-          description="Add products manually to start tracking stock."
+          description="Connect Shopify and run a read-only sync to begin tracking products and stock."
         />
       ) : (
         <div className="table-wrap">
-          <table className="data-table">
+          <table className="data-table data-table-mobile">
+            <caption className="sr-only">Inventory products</caption>
             <thead>
               <tr>
                 <th>Product</th>
@@ -177,12 +178,14 @@ export default async function InventoryPage({ params }: { params: Promise<{ loca
             <tbody>
               {products.map((product) => (
                 <tr key={product.id}>
-                  <td>
+                  <td data-label="Product">
                     <div className="strong-cell">{product.name}</div>
                     <div>{product.sku ?? 'No SKU'}</div>
                   </td>
-                  <td>{formatMoney(product.price, workspace.baseCurrency, locale)}</td>
-                  <td>
+                  <td data-label="Price">
+                    {formatMoney(product.price, workspace.baseCurrency, locale)}
+                  </td>
+                  <td data-label="Stock">
                     <span
                       className={`badge ${product.stock <= product.lowStockThreshold ? 'badge-warning' : 'badge-success'}`}
                     >
@@ -190,16 +193,16 @@ export default async function InventoryPage({ params }: { params: Promise<{ loca
                     </span>
                     <div>{product.reservedStock} reserved</div>
                   </td>
-                  <td>
+                  <td data-label="Recent records">
                     {product.inventoryRecords.length === 0
-                      ? '-'
+                      ? 'Unavailable'
                       : product.inventoryRecords.map((record) => (
                           <div key={record.id}>
                             {record.type} {record.quantity}: {record.reason ?? 'No reason'}
                           </div>
                         ))}
                   </td>
-                  <td>
+                  <td data-label="Adjust">
                     <form action={adjustStock} className="inline-form">
                       <input name="id" type="hidden" value={product.id} />
                       <input

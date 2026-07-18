@@ -364,7 +364,8 @@ export default async function OrdersPage({
         />
       ) : (
         <div className="table-wrap">
-          <table className="data-table">
+          <table className="data-table data-table-mobile">
+            <caption className="sr-only">Filtered orders</caption>
             <thead>
               <tr>
                 <th>Order</th>
@@ -380,24 +381,28 @@ export default async function OrdersPage({
             <tbody>
               {orders.data.map((order) => (
                 <tr key={order.id}>
-                  <td className="strong-cell">
+                  <td className="strong-cell" data-label="Order">
                     <Link href={`/${locale}/orders/${order.id}`} prefetch={false}>
                       {order.orderNumber}
                     </Link>
                   </td>
-                  <td>
+                  <td data-label="Customer">
                     <div className="strong-cell">{order.customerName}</div>
                     <div>{order.customerPhone}</div>
                   </td>
-                  <td>{order.customer?.city ?? '-'}</td>
-                  <td>{order.items.map((item) => `${item.quantity}x ${item.name}`).join(', ')}</td>
-                  <td>
+                  <td data-label="City">{order.customer?.city ?? 'Unavailable'}</td>
+                  <td data-label="Items">
+                    {order.items.map((item) => `${item.quantity}x ${item.name}`).join(', ')}
+                  </td>
+                  <td data-label="Source">
                     <StatusBadge tone={order.source === 'shopify' ? 'info' : 'muted'}>
                       {order.source === 'shopify' ? 'Shopify' : order.source || 'Manual'}
                     </StatusBadge>
                   </td>
-                  <td>{formatMoney(order.totalAmount, workspace.baseCurrency, locale)}</td>
-                  <td>
+                  <td data-label="Total">
+                    {formatMoney(order.totalAmount, workspace.baseCurrency, locale)}
+                  </td>
+                  <td data-label="Margin">
                     {order.costSnapshot ? (
                       <div>
                         <div>
@@ -417,7 +422,7 @@ export default async function OrdersPage({
                       <StatusBadge tone="warning">Cost missing</StatusBadge>
                     )}
                   </td>
-                  <td>
+                  <td data-label="Status">
                     <StatusBadge tone="muted">
                       {order.status === 'PENDING' ? 'ORDERED' : order.status}
                     </StatusBadge>
@@ -428,7 +433,7 @@ export default async function OrdersPage({
           </table>
           <nav className="pagination-bar" aria-label="Orders pagination">
             <span>
-              Showing {(orders.page - 1) * orders.limit + 1}–
+              Showing {(orders.page - 1) * orders.limit + 1}-
               {Math.min(orders.page * orders.limit, orders.total)} of {orders.total} orders
             </span>
             <div className="button-row">

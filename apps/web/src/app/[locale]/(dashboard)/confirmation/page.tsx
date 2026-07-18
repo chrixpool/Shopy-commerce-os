@@ -1,6 +1,7 @@
 import Link from 'next/link';
 import { revalidatePath } from 'next/cache';
 import { EmptyState, MetricCard, PageHeader } from '@/components/ui/page';
+import { FormSubmitButton } from '@/components/ui/form-submit-button';
 import { apiFetch, getWorkspaceSettings } from '@/lib/api';
 import { formatMoney } from '@/lib/currency';
 
@@ -211,7 +212,8 @@ export default async function ConfirmationPage({
       ) : (
         <>
           <div className="table-wrap">
-            <table className="data-table">
+            <table className="data-table data-table-mobile">
+              <caption className="sr-only">Confirmation work queue</caption>
               <thead>
                 <tr>
                   <th>Order</th>
@@ -229,13 +231,13 @@ export default async function ConfirmationPage({
               <tbody>
                 {tasks.map((task) => (
                   <tr key={task.id}>
-                    <td className="strong-cell">
+                    <td className="strong-cell" data-label="Order">
                       <Link href={`/${locale}/orders/${task.order.id}`} prefetch={false}>
                         {task.order.orderNumber}
                       </Link>
                       <div className="field-help">{ageLabel(task.order.createdAt)}</div>
                     </td>
-                    <td>
+                    <td data-label="Customer">
                       <div className="strong-cell">{task.order.customerName}</div>
                       <div>{task.order.customerPhone}</div>
                       <div className="inline-form" style={{ marginTop: 8 }}>
@@ -255,19 +257,21 @@ export default async function ConfirmationPage({
                         </a>
                       </div>
                     </td>
-                    <td>{task.order.customer?.city ?? '-'}</td>
-                    <td>{formatMoney(task.order.totalAmount, workspace.baseCurrency, locale)}</td>
-                    <td>{task.order._count.items}</td>
-                    <td>
+                    <td data-label="City">{task.order.customer?.city ?? 'Unavailable'}</td>
+                    <td data-label="Value">
+                      {formatMoney(task.order.totalAmount, workspace.baseCurrency, locale)}
+                    </td>
+                    <td data-label="Items">{task.order._count.items}</td>
+                    <td data-label="Source">
                       <span className="badge badge-muted">{task.order.source.toUpperCase()}</span>
                     </td>
-                    <td>
+                    <td data-label="Task">
                       <span className="badge badge-muted">{task.status}</span>
                       <div>
                         {task.attempts} attempt{task.attempts === 1 ? '' : 's'}
                       </div>
                     </td>
-                    <td>
+                    <td data-label="Priority">
                       <span
                         className={`badge ${task.priority === 'HIGH' ? 'badge-danger' : task.priority === 'MEDIUM' ? 'badge-warning' : 'badge-muted'}`}
                       >
@@ -275,45 +279,49 @@ export default async function ConfirmationPage({
                       </span>
                       <div className="field-help">{task.overdue ? 'Overdue' : 'Within SLA'}</div>
                     </td>
-                    <td>
+                    <td data-label="Last action">
                       {task.lastAction ?? 'No action yet'}
                       <div className="field-help">{task.assignedTo?.name ?? 'Unassigned'}</div>
                     </td>
-                    <td>
+                    <td data-label="Action">
                       <form action={updateConfirmation} className="inline-form">
                         <input name="id" type="hidden" value={task.id} />
-                        <button
+                        <FormSubmitButton
                           className="button button-secondary"
                           name="action"
+                          pendingLabel="Saving..."
                           value="CALL_LATER"
                           type="submit"
                         >
                           Follow up
-                        </button>
-                        <button
+                        </FormSubmitButton>
+                        <FormSubmitButton
                           className="button button-secondary"
                           name="action"
+                          pendingLabel="Saving..."
                           value="UNREACHABLE"
                           type="submit"
                         >
                           Unreachable
-                        </button>
-                        <button
+                        </FormSubmitButton>
+                        <FormSubmitButton
                           className="button button-secondary"
                           name="action"
+                          pendingLabel="Saving..."
                           value="CANCELLED"
                           type="submit"
                         >
                           Cancel
-                        </button>
-                        <button
+                        </FormSubmitButton>
+                        <FormSubmitButton
                           className="button button-primary"
                           name="action"
+                          pendingLabel="Confirming..."
                           value="CONFIRMED"
                           type="submit"
                         >
                           Confirm
-                        </button>
+                        </FormSubmitButton>
                       </form>
                     </td>
                   </tr>

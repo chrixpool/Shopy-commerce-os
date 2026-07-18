@@ -36,8 +36,15 @@ function formatDate(value: string, locale: string) {
   }).format(new Date(value));
 }
 
-export default async function ActivityPage({ params }: { params: Promise<{ locale: string }> }) {
+export default async function ActivityPage({
+  params,
+  searchParams,
+}: {
+  params: Promise<{ locale: string }>;
+  searchParams?: Promise<{ source?: string; action?: string; actor?: string }>;
+}) {
   const { locale } = await params;
+  const filters = (await searchParams) ?? {};
   const [businessActivity, automationRuns, shopifyRuns] = await Promise.all([
     optionalApiFetch<BusinessActivity[]>('/api/v1/orders/activity', []),
     optionalApiFetch<AutomationRun[]>('/api/v1/automations/runs', []),
@@ -69,7 +76,16 @@ export default async function ActivityPage({ params }: { params: Promise<{ local
       at: run.startedAt,
       tone: run.status === 'SUCCESS' ? 'success' : run.errorMessage ? 'warning' : 'info',
     })),
-  ].sort((a, b) => new Date(b.at).getTime() - new Date(a.at).getTime());
+  ]
+    .filter((item) => !filters.source || item.type === filters.source)
+    .filter(
+      (item) => !filters.action || item.title.toLowerCase().includes(filters.action.toLowerCase()),
+    )
+    .filter(
+      (item) =>
+        !filters.actor || item.description.toLowerCase().includes(filters.actor.toLowerCase()),
+    )
+    .sort((a, b) => new Date(b.at).getTime() - new Date(a.at).getTime());
 
   return (
     <div className="page-stack">
@@ -83,6 +99,41 @@ export default async function ActivityPage({ params }: { params: Promise<{ local
           </Link>
         }
       />
+
+      <form className="toolbar" aria-label="Activity filters">
+        <label className="form-field compact-select">
+          <span>Source</span>
+          <select className="select-field" name="source" defaultValue={filters.source ?? ''}>
+            <option value="">All sources</option>
+            <option value="USER">User</option>
+            <option value="SYSTEM">System</option>
+            <option value="SHOPIFY">Shopify</option>
+            <option value="MES COLIS">Mes Colis</option>
+            <option value="AUTOMATION">Automation</option>
+          </select>
+        </label>
+        <label className="form-field">
+          <span>Action</span>
+          <input
+            className="field"
+            name="action"
+            defaultValue={filters.action ?? ''}
+            placeholder="Filter action"
+          />
+        </label>
+        <label className="form-field">
+          <span>Actor</span>
+          <input
+            className="field"
+            name="actor"
+            defaultValue={filters.actor ?? ''}
+            placeholder="Filter actor"
+          />
+        </label>
+        <button className="button button-secondary" type="submit">
+          Apply filters
+        </button>
+      </form>
 
       <section className="stats-grid" aria-label="Activity summary">
         <MetricCard

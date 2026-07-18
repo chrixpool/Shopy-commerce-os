@@ -1,7 +1,15 @@
 import Link from 'next/link';
 import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
-import { EmptyState, MetricCard, PageHeader, StatusBadge } from '@/components/ui/page';
+import {
+  DataTrustStrip,
+  EmptyState,
+  IntegrationHealthBadge,
+  MetricCard,
+  PageHeader,
+  StatusBadge,
+  integrationHealthState,
+} from '@/components/ui/page';
 import { apiFetch, getWorkspaceSettings } from '@/lib/api';
 import { formatMoney } from '@/lib/currency';
 
@@ -192,6 +200,50 @@ export default async function DeliveryPage({
         description="Dispatch parcels, track delivery attempts, and close delivered or returned orders."
       />
 
+      <DataTrustStrip
+        label="Delivery data trust"
+        items={[
+          {
+            label: 'Provider',
+            value: 'Mes Colis',
+            detail: 'Read-only tracking',
+            state: mesColisConnected ? 'confirmed' : 'unavailable',
+          },
+          {
+            label: 'Health',
+            value: (
+              <IntegrationHealthBadge
+                state={integrationHealthState({
+                  status: mesColis.status,
+                  warningCount: mesColis.warningCount,
+                  lastSyncAt: mesColis.lastSyncAt,
+                })}
+              />
+            ),
+            detail: `${mesColis.warningCount} warning(s)`,
+            state: mesColis.warningCount
+              ? 'partial'
+              : mesColisConnected
+                ? 'confirmed'
+                : 'unavailable',
+          },
+          {
+            label: 'Freshness',
+            value: mesColis.lastSyncAt
+              ? new Date(mesColis.lastSyncAt).toLocaleString(locale)
+              : 'Not synced yet',
+            detail: 'Last successful parcel refresh',
+            state: mesColis.lastSyncAt ? 'confirmed' : 'unavailable',
+          },
+          {
+            label: 'Completeness',
+            value: `${providerParcels.filter((item) => item.orderId).length}/${providerParcels.length} linked`,
+            detail: `${mappingReview.length} need mapping review`,
+            state: mappingReview.length ? 'partial' : 'confirmed',
+          },
+        ]}
+      />
+
       {notice.message ? (
         <div
           className={`status-banner ${notice.result === 'error' ? 'status-banner-warning' : ''}`}
@@ -326,7 +378,8 @@ export default async function DeliveryPage({
 
       {mappingReview.length ? (
         <div className="table-wrap">
-          <table className="data-table">
+          <table className="data-table data-table-mobile">
+            <caption className="sr-only">Mes Colis mapping review</caption>
             <thead>
               <tr>
                 <th>Barcode</th>
@@ -339,15 +392,15 @@ export default async function DeliveryPage({
             <tbody>
               {mappingReview.map((item) => (
                 <tr key={item.id}>
-                  <td>{item.barcode}</td>
-                  <td>{item.providerStatus}</td>
-                  <td>
+                  <td data-label="Barcode">{item.barcode}</td>
+                  <td data-label="Provider status">{item.providerStatus}</td>
+                  <td data-label="Match">
                     <span className="badge badge-muted">
                       {item.matchState.replaceAll('_', ' ')}
                     </span>
                   </td>
-                  <td>{item.matchConfidence}%</td>
-                  <td>
+                  <td data-label="Confidence">{item.matchConfidence}%</td>
+                  <td data-label="Review">
                     <form action={linkMesColis} className="inline-form">
                       <input name="id" type="hidden" value={item.id} />
                       <input name="locale" type="hidden" value={locale} />
@@ -371,7 +424,8 @@ export default async function DeliveryPage({
 
       {providerParcels.length ? (
         <div className="table-wrap">
-          <table className="data-table">
+          <table className="data-table data-table-mobile">
+            <caption className="sr-only">Mes Colis provider tracking</caption>
             <thead>
               <tr>
                 <th>Provider / barcode</th>
@@ -385,18 +439,18 @@ export default async function DeliveryPage({
             <tbody>
               {providerParcels.map((item) => (
                 <tr key={item.id}>
-                  <td>
+                  <td data-label="Provider / barcode">
                     <strong>Mes Colis</strong>
                     <div>{item.barcode}</div>
                   </td>
-                  <td>{item.providerStatus}</td>
-                  <td>
+                  <td data-label="Provider status">{item.providerStatus}</td>
+                  <td data-label="Normalized">
                     <span className="badge badge-muted">
                       {item.normalizedStatus.replaceAll('_', ' ')}
                     </span>
                   </td>
-                  <td>{item.matchState.replaceAll('_', ' ')}</td>
-                  <td>
+                  <td data-label="Match">{item.matchState.replaceAll('_', ' ')}</td>
+                  <td data-label="Last update">
                     {item.lastProviderUpdateAt
                       ? new Intl.DateTimeFormat(locale, {
                           dateStyle: 'medium',
@@ -404,7 +458,7 @@ export default async function DeliveryPage({
                         }).format(new Date(item.lastProviderUpdateAt))
                       : 'Unknown'}
                   </td>
-                  <td>
+                  <td data-label="Tracking">
                     {item.orderId ? (
                       <div className="button-row">
                         <Link
@@ -463,7 +517,8 @@ export default async function DeliveryPage({
         />
       ) : (
         <div className="table-wrap">
-          <table className="data-table">
+          <table className="data-table data-table-mobile">
+            <caption className="sr-only">Operational delivery records</caption>
             <thead>
               <tr>
                 <th>Parcel</th>
@@ -478,7 +533,7 @@ export default async function DeliveryPage({
             <tbody>
               {parcels.map((parcel) => (
                 <tr key={parcel.id}>
-                  <td>
+                  <td data-label="Parcel">
                     <div className="strong-cell">
                       <Link href={`/${locale}/orders/${parcel.order.id}`} prefetch={false}>
                         {parcel.trackingNumber ?? parcel.order.orderNumber}
@@ -486,17 +541,21 @@ export default async function DeliveryPage({
                     </div>
                     <div>{parcel.provider}</div>
                   </td>
-                  <td>
+                  <td data-label="Customer">
                     <div className="strong-cell">{parcel.order.customerName}</div>
                     <div>{parcel.order.customerPhone}</div>
                   </td>
-                  <td>{parcel.order.customer?.city ?? '-'}</td>
-                  <td>{formatMoney(parcel.order.totalAmount, workspace.baseCurrency, locale)}</td>
-                  <td>
+                  <td data-label="City">{parcel.order.customer?.city ?? 'Unavailable'}</td>
+                  <td data-label="Value">
+                    {formatMoney(parcel.order.totalAmount, workspace.baseCurrency, locale)}
+                  </td>
+                  <td data-label="Status">
                     <span className="badge badge-muted">{parcel.status}</span>
                   </td>
-                  <td>{parcel.events[0]?.note ?? parcel.events[0]?.status ?? '-'}</td>
-                  <td>
+                  <td data-label="Latest event">
+                    {parcel.events[0]?.note ?? parcel.events[0]?.status ?? 'Unavailable'}
+                  </td>
+                  <td data-label="Mode">
                     <StatusBadge tone="info">Provider managed</StatusBadge>
                   </td>
                 </tr>
