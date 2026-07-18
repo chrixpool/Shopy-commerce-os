@@ -13,6 +13,11 @@ import {
   integrationHealthState,
 } from '@/components/ui/page';
 import { WorkspaceRecovery } from '@/components/ui/workspace-recovery';
+import {
+  FormSubmitButton,
+  IntegrationActionForm,
+  type FormActionState,
+} from '@/components/ui/form-submit-button';
 import { apiFetch, apiFetchState } from '@/lib/api';
 import { formatMoney } from '@/lib/currency';
 
@@ -91,11 +96,25 @@ interface SyncAllRun {
   }>;
 }
 
-async function syncAllIntegrations() {
+async function syncAllIntegrations(
+  _state: FormActionState,
+  _formData: FormData,
+): Promise<FormActionState> {
   'use server';
-  await apiFetch('/api/v1/integrations/sync-all', { method: 'POST' });
-  revalidatePath('/[locale]/dashboard', 'page');
-  revalidatePath('/[locale]/settings', 'page');
+  try {
+    await apiFetch('/api/v1/integrations/sync-all', { method: 'POST' });
+    revalidatePath('/[locale]/dashboard', 'page');
+    revalidatePath('/[locale]/settings', 'page');
+    return {
+      status: 'success',
+      message: 'Integration sync started. Provider results update independently.',
+    };
+  } catch (error) {
+    return {
+      status: 'error',
+      message: error instanceof Error ? error.message : 'Integration sync could not be started.',
+    };
+  }
 }
 
 const EMPTY_SUMMARY: DashboardSummary = {
@@ -692,11 +711,15 @@ export default async function DashboardPage({
             title="Integration health"
             description="Independent read-only sync status across connected commerce channels."
             actions={
-              <form action={syncAllIntegrations}>
-                <button className="button button-primary" type="submit">
+              <IntegrationActionForm action={syncAllIntegrations}>
+                <FormSubmitButton
+                  className="button button-primary"
+                  pendingLabel="Starting sync..."
+                  type="submit"
+                >
                   Sync all
-                </button>
-              </form>
+                </FormSubmitButton>
+              </IntegrationActionForm>
             }
           />
           <div className="snapshot-grid" style={{ marginTop: 16 }}>

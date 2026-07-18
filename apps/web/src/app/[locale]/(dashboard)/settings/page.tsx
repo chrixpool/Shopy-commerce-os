@@ -209,12 +209,42 @@ async function selectMetaAccount(formData: FormData) {
   revalidatePath('/[locale]/campaigns', 'page');
 }
 
-async function syncAllIntegrations() {
+async function syncAllIntegrations(
+  _state: FormActionState,
+  _formData: FormData,
+): Promise<FormActionState> {
   'use server';
-  await apiFetch('/api/v1/integrations/sync-all', { method: 'POST' });
-  revalidatePath('/[locale]/settings', 'page');
-  revalidatePath('/[locale]/dashboard', 'page');
-  revalidatePath('/[locale]/campaigns', 'page');
+  try {
+    await apiFetch('/api/v1/integrations/sync-all', { method: 'POST' });
+    revalidatePath('/[locale]/settings', 'page');
+    revalidatePath('/[locale]/dashboard', 'page');
+    revalidatePath('/[locale]/campaigns', 'page');
+    return {
+      status: 'success',
+      message: 'Integration sync started. Each connected provider runs independently.',
+    };
+  } catch (error) {
+    return { status: 'error', message: actionMessage(error) };
+  }
+}
+
+async function verifyShopifyData(
+  _state: FormActionState,
+  _formData: FormData,
+): Promise<FormActionState> {
+  'use server';
+  try {
+    const result = await apiFetch<ShopifyVerification>('/api/v1/integrations/shopify/verification');
+    revalidatePath('/[locale]/settings', 'page');
+    return result.mismatches.length
+      ? {
+          status: 'error',
+          message: `${result.mismatches.length} Shopify total mismatch(es) need review.`,
+        }
+      : { status: 'success', message: 'Shopify imported totals match the latest sync.' };
+  } catch (error) {
+    return { status: 'error', message: actionMessage(error) };
+  }
 }
 
 async function syncIntegration(
@@ -229,11 +259,21 @@ async function syncIntegration(
   try {
     if (provider === 'MES_COLIS') {
       if (!dryRun) {
-        await apiFetch('/api/v1/integrations/mes-colis/sync-linked', { method: 'POST' });
+        const result = await apiFetch<{
+          duplicatePrevented?: boolean;
+          linked?: number;
+          updated?: number;
+          unchanged?: number;
+          failed?: number;
+        }>('/api/v1/integrations/mes-colis/sync-linked', { method: 'POST' });
+        successMessage = result.duplicatePrevented
+          ? 'A Mes Colis refresh is already running. No duplicate run was created.'
+          : result.linked
+            ? `Mes Colis refreshed ${result.linked} linked barcode(s): ${result.updated ?? 0} updated, ${result.unchanged ?? 0} unchanged, ${result.failed ?? 0} failed.`
+            : 'Mes Colis connection is healthy. Link a barcode in Delivery before refreshing tracking.';
       }
       revalidatePath('/[locale]/settings', 'page');
       revalidatePath('/[locale]/delivery', 'page');
-      successMessage = 'Mes Colis linked barcodes refreshed. No external parcel data was changed.';
     } else {
       await apiFetch(
         `/api/v1/integrations/${provider.toLowerCase().replaceAll('_', '-')}${dryRun ? '/dry-run' : '/sync'}`,
@@ -487,11 +527,15 @@ export default async function SettingsPage({ params }: { params: Promise<{ local
               rest when saved and never shown again.
             </p>
           </div>
-          <form action={syncAllIntegrations}>
-            <button className="button button-primary" type="submit">
+          <IntegrationActionForm action={syncAllIntegrations}>
+            <FormSubmitButton
+              className="button button-primary"
+              pendingLabel="Starting sync..."
+              type="submit"
+            >
               Sync all
-            </button>
-          </form>
+            </FormSubmitButton>
+          </IntegrationActionForm>
         </div>
         {latestSyncAll ? (
           <div className="sync-center" style={{ marginTop: 16 }}>
@@ -967,11 +1011,15 @@ export default async function SettingsPage({ params }: { params: Promise<{ local
                             </p>
                           </div>
                           <div className="actions-row">
-                            <form>
-                              <button className="button button-secondary" type="submit">
+                            <IntegrationActionForm action={verifyShopifyData}>
+                              <FormSubmitButton
+                                className="button button-secondary"
+                                pendingLabel="Verifying..."
+                                type="submit"
+                              >
                                 Verify Shopify data
-                              </button>
-                            </form>
+                              </FormSubmitButton>
+                            </IntegrationActionForm>
                             <StatusBadge
                               tone={
                                 shopifyVerification.mismatches.length ||

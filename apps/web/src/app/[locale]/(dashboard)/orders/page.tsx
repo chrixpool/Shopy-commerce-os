@@ -133,6 +133,8 @@ export default async function OrdersPage({
       summaryQuery.set(key, value);
     }
   }
+  const returnTo = `/${locale}/orders?${query.toString()}`;
+  const hasActiveFilters = Array.from(summaryQuery.keys()).length > 0;
 
   const [orders, summary, workspace] = await Promise.all([
     apiFetch<OrdersResponse>(`/api/v1/orders?${query.toString()}`),
@@ -352,10 +354,20 @@ export default async function OrdersPage({
       {orders.data.length === 0 ? (
         <EmptyState
           icon="OR"
-          title="No Shopify orders synced yet"
-          description="Connect Shopify and run a read-only sync to bring orders into this workspace."
+          title={
+            hasActiveFilters ? 'No orders match these filters' : 'No Shopify orders synced yet'
+          }
+          description={
+            hasActiveFilters
+              ? 'Clear or adjust the filters to return to the full order list.'
+              : 'Connect Shopify and run a read-only sync to bring orders into this workspace.'
+          }
           action={
-            manualWorkflowsEnabled ? (
+            hasActiveFilters ? (
+              <Link className="button button-primary" href={`/${locale}/orders`}>
+                Clear filters
+              </Link>
+            ) : manualWorkflowsEnabled ? (
               <Link className="button button-primary" href={`/${locale}/orders/new`}>
                 Create order
               </Link>
@@ -382,7 +394,10 @@ export default async function OrdersPage({
               {orders.data.map((order) => (
                 <tr key={order.id}>
                   <td className="strong-cell" data-label="Order">
-                    <Link href={`/${locale}/orders/${order.id}`} prefetch={false}>
+                    <Link
+                      href={`/${locale}/orders/${order.id}?returnTo=${encodeURIComponent(returnTo)}`}
+                      prefetch={false}
+                    >
                       {order.orderNumber}
                     </Link>
                   </td>

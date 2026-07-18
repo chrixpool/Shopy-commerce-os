@@ -149,9 +149,28 @@ for (const forbidden of ['/orders/Create', '/orders/DeleteOrder', '/sub_accounts
     `Forbidden Mes Colis write path: ${forbidden}`,
   );
 }
+const syncLinkedSource = mesColisSource.slice(
+  mesColisSource.indexOf('async syncLinked'),
+  mesColisSource.indexOf('mappingReview('),
+);
+assert.ok(
+  syncLinkedSource.indexOf('automationRun.updateMany') <
+    syncLinkedSource.indexOf('automationRun.findFirst'),
+  'Mes Colis sync must recover stale runs before duplicate-run detection',
+);
 
 const mainSource = fs.readFileSync(new URL('../apps/api/src/main.ts', import.meta.url), 'utf8');
 assert.equal(mainSource.includes('API_INTERNAL_SECRET is required in production'), true);
+
+const webApiSource = fs.readFileSync(
+  new URL('../apps/web/src/lib/api.ts', import.meta.url),
+  'utf8',
+);
+assert.equal(
+  webApiSource.includes("API_INTERNAL_SECRET || 'shopy-internal-secret'"),
+  false,
+  'The web API client must not use a hardcoded internal secret fallback',
+);
 
 const integrationsSource = fs.readFileSync(
   new URL('../apps/api/src/modules/integrations/integrations.service.ts', import.meta.url),

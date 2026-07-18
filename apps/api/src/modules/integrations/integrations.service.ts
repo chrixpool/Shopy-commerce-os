@@ -156,6 +156,7 @@ export class IntegrationsService implements OnModuleInit {
       const providerRuns = recentRuns.filter(
         (run) => asRecord(run.inputSnapshot).provider === provider && !run.dryRun,
       );
+      const config = asRecord(row?.config);
       return {
         provider,
         label: PROVIDER_LABELS[provider],
@@ -166,7 +167,10 @@ export class IntegrationsService implements OnModuleInit {
           (provider === IntegrationProvider.CSV || provider === IntegrationProvider.MANUAL),
         lastSyncAt: row?.lastSyncAt ?? null,
         lastSuccessfulSyncAt:
-          providerRuns.find((run) => run.status === 'SUCCESS')?.finishedAt ?? null,
+          providerRuns.find((run) => run.status === 'SUCCESS')?.finishedAt ??
+          (provider === IntegrationProvider.MES_COLIS
+            ? parseOptionalDate(config.lastSuccessfulSyncAt)
+            : null),
         lastFailedSyncAt: providerRuns.find((run) => run.status === 'FAILED')?.finishedAt ?? null,
         errorMessage: row?.errorMessage ?? null,
         capabilities: adapter.capabilities(),
@@ -297,6 +301,7 @@ export class IntegrationsService implements OnModuleInit {
       select: { inputSnapshot: true },
     });
     const durableRunId = String(asRecord(legacyRun?.inputSnapshot).durableRunId ?? '');
+    const initiatedBy = String(asRecord(legacyRun?.inputSnapshot).initiatedBy ?? '');
     const runnable = initial.filter((item) => item.status === 'queued');
     const providers = initial.map((item) =>
       item.status === 'queued' ? { ...item, status: 'syncing' } : item,
@@ -319,7 +324,7 @@ export class IntegrationsService implements OnModuleInit {
       let providerResult: ReturnType<typeof syncProviderResult>;
       try {
         if (provider === IntegrationProvider.MES_COLIS) {
-          const result = await this.mesColis.syncLinked(organizationId);
+          const result = await this.mesColis.syncLinked(organizationId, initiatedBy || undefined);
           const totals =
             'linked' in result ? result : { linked: 0, updated: 0, unchanged: 0, failed: 1 };
           providerResult = syncProviderResult(
@@ -1660,6 +1665,12 @@ function normalizeMode(value?: string) {
 
 function asRecord(value: unknown): Record<string, unknown> {
   return typeof value === 'object' && value !== null ? (value as Record<string, unknown>) : {};
+}
+
+function parseOptionalDate(value: unknown) {
+  if (typeof value !== 'string') return null;
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? null : date;
 }
 
 function decryptCredentials(

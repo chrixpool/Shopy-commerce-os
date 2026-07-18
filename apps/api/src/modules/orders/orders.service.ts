@@ -182,28 +182,61 @@ export class OrdersService {
   }
 
   async activity(organizationId: string, filters: { action?: string; source?: string } = {}) {
-    const events = await this.prisma.orderEvent.findMany({
-      where: {
-        order: { organizationId },
-        ...(filters.action ? { type: filters.action } : {}),
-        ...(filters.source
-          ? { data: { path: ['source'], equals: filters.source.toUpperCase() } }
-          : {}),
-      },
-      select: {
-        id: true,
-        type: true,
-        note: true,
-        data: true,
-        createdAt: true,
-        user: { select: { name: true, role: true } },
-        order: { select: { id: true, orderNumber: true } },
-      },
-      orderBy: { createdAt: 'desc' },
-      take: 100,
-    });
+    const [events, syncRuns] = await Promise.all([
+      this.prisma.orderEvent.findMany({
+        where: {
+          order: { organizationId },
+          ...(filters.action ? { type: filters.action } : {}),
+          ...(filters.source
+            ? { data: { path: ['source'], equals: filters.source.toUpperCase() } }
+            : {}),
+        },
+        select: {
+          id: true,
+          type: true,
+          note: true,
+          data: true,
+          createdAt: true,
+          user: { select: { name: true, role: true } },
+          order: { select: { id: true, orderNumber: true } },
+        },
+        orderBy: { createdAt: 'desc' },
+        take: 100,
+      }),
+      this.prisma.automationRun.findMany({
+        where: {
+          organizationId,
+          OR: [
+            { inputSnapshot: { path: ['type'], equals: 'SYNC_ALL' } },
+            { inputSnapshot: { path: ['type'], equals: 'SYNC' } },
+          ],
+        },
+        select: {
+          id: true,
+          status: true,
+          startedAt: true,
+          finishedAt: true,
+          inputSnapshot: true,
+        },
+        orderBy: { startedAt: 'desc' },
+        take: 50,
+      }),
+    ]);
 
-    return events.map((event) => {
+    const actorIds = syncRuns
+      .map((run) =>
+        String(((run.inputSnapshot ?? {}) as Record<string, unknown>).initiatedBy ?? ''),
+      )
+      .filter(Boolean);
+    const actors = actorIds.length
+      ? await this.prisma.user.findMany({
+          where: { id: { in: actorIds }, organizationId },
+          select: { id: true, name: true, role: true },
+        })
+      : [];
+    const actorById = new Map(actors.map((actor) => [actor.id, actor]));
+
+    const orderActivity = events.map((event) => {
       const data = (event.data ?? {}) as Record<string, unknown>;
       const source = String(data.source ?? (event.user ? 'USER' : 'SYSTEM'));
       return {
@@ -224,6 +257,29 @@ export class OrdersService {
         createdAt: event.createdAt,
       };
     });
+    const syncActivity = syncRuns.map((run) => {
+      const input = (run.inputSnapshot ?? {}) as Record<string, unknown>;
+      const provider = String(input.provider ?? 'SYSTEM');
+      const initiatedBy = String(input.initiatedBy ?? '');
+      const actor = actorById.get(initiatedBy);
+      return {
+        id: `sync-${run.id}`,
+        action: String(input.type ?? 'SYNC').toLowerCase(),
+        note: `${provider.replaceAll('_', ' ')} sync ${run.status.toLowerCase()}`,
+        source: provider,
+        actor: actor?.name ?? (provider === 'MES_COLIS' ? 'Mes Colis' : 'System'),
+        actorRole: actor?.role ?? null,
+        entityId: run.id,
+        entityReference: provider.replaceAll('_', ' '),
+        createdAt: run.finishedAt ?? run.startedAt,
+      };
+    });
+
+    return [...orderActivity, ...syncActivity]
+      .filter((event) => !filters.action || event.action === filters.action)
+      .filter((event) => !filters.source || event.source === filters.source.toUpperCase())
+      .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())
+      .slice(0, 100);
   }
 
   async getTimeline(organizationId: string, id: string) {

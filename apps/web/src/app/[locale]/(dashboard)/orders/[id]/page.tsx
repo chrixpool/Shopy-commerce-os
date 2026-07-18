@@ -3,7 +3,7 @@ import { Suspense, type ReactNode } from 'react';
 import { revalidatePath } from 'next/cache';
 import { notFound } from 'next/navigation';
 import { MetricCard, PageHeader, StatusBadge, SurfaceCard } from '@/components/ui/page';
-import { apiFetch, getWorkspaceSettings } from '@/lib/api';
+import { ApiRequestError, apiFetch, getWorkspaceSettings } from '@/lib/api';
 import { formatMoney } from '@/lib/currency';
 
 interface ControlOrder {
@@ -190,15 +190,21 @@ function revalidateOrder(orderId: string) {
 
 export default async function OrderControlCenterPage({
   params,
+  searchParams,
 }: {
   params: Promise<{ locale: string; id: string }>;
+  searchParams: Promise<{ returnTo?: string }>;
 }) {
   const { locale, id } = await params;
+  const query = await searchParams;
+  const defaultReturnTo = `/${locale}/orders`;
+  const returnTo = safeReturnPath(query.returnTo, defaultReturnTo, locale);
   let order: ControlOrder;
   try {
     order = await apiFetch<ControlOrder>(`/api/v1/orders/${id}`);
-  } catch {
-    notFound();
+  } catch (error) {
+    if (error instanceof ApiRequestError && error.status === 404) notFound();
+    throw error;
   }
   const workspace = await getWorkspaceSettings();
   const city = String(order.shippingAddress?.city ?? order.customer?.city ?? '-');
@@ -215,7 +221,7 @@ export default async function OrderControlCenterPage({
         description="See the full operational story of this order and move confirmation, fulfillment, delivery, and margin work forward from one place."
         actions={
           <>
-            <Link className="button button-secondary" href={`/${locale}/orders`}>
+            <Link className="button button-secondary" href={returnTo}>
               Back to orders
             </Link>
             <a className="button button-secondary" href={`tel:${order.customerPhone}`}>
@@ -574,6 +580,12 @@ export default async function OrderControlCenterPage({
       </SurfaceCard>
     </div>
   );
+}
+
+function safeReturnPath(value: string | undefined, fallback: string, locale: string) {
+  if (!value) return fallback;
+  const expectedPrefix = `/${locale}/orders`;
+  return value === expectedPrefix || value.startsWith(`${expectedPrefix}?`) ? value : fallback;
 }
 
 async function OrderTimelineSection({ orderId, locale }: { orderId: string; locale: string }) {

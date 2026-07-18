@@ -203,7 +203,7 @@ export class MesColisController {
   @Post('sync-linked')
   @RequireRole(Role.ADMIN)
   syncLinked(@CurrentUser() user: SessionUser) {
-    return this.mesColis.syncLinked(user.organizationId);
+    return this.mesColis.syncLinked(user.organizationId, user.id);
   }
 
   @Post('parcels/:id/refresh')

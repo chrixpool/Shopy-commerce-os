@@ -14,6 +14,7 @@ import { IntegrationSecretsService } from './crypto/integration-secrets.service'
 
 const MES_COLIS_API = () => process.env.MES_COLIS_API_URL || 'https://api.mescolis.tn/api';
 const MES_COLIS_SOCKET = () => process.env.MES_COLIS_SOCKET_URL || 'https://api.mescolis.tn:4001';
+const STALE_SYNC_AFTER_MS = 10 * 60 * 1000;
 
 export const MES_COLIS_STATUSES = [
   'pending',
@@ -254,7 +255,21 @@ export class MesColisService implements OnModuleInit, OnModuleDestroy {
     });
   }
 
-  async syncLinked(organizationId: string) {
+  async syncLinked(organizationId: string, initiatedBy?: string) {
+    const staleBefore = new Date(Date.now() - STALE_SYNC_AFTER_MS);
+    await this.prisma.automationRun.updateMany({
+      where: {
+        organizationId,
+        status: { in: ['QUEUED', 'RUNNING'] },
+        startedAt: { lt: staleBefore },
+        inputSnapshot: { path: ['provider'], equals: 'MES_COLIS' },
+      },
+      data: {
+        status: 'FAILED',
+        finishedAt: new Date(),
+        errorMessage: 'Mes Colis sync stopped before completion and can be retried safely.',
+      },
+    });
     const active = await this.prisma.automationRun.findFirst({
       where: {
         organizationId,
@@ -269,7 +284,11 @@ export class MesColisService implements OnModuleInit, OnModuleDestroy {
         organizationId,
         status: 'RUNNING',
         dryRun: false,
-        inputSnapshot: { provider: 'MES_COLIS', type: 'SYNC' },
+        inputSnapshot: {
+          provider: 'MES_COLIS',
+          type: 'SYNC',
+          ...(initiatedBy ? { initiatedBy } : {}),
+        },
       },
     });
     const providerRows = await this.prisma.providerParcel.findMany({
@@ -327,12 +346,17 @@ export class MesColisService implements OnModuleInit, OnModuleDestroy {
     }
     const status =
       totals.failed === 0 ? 'SUCCESS' : totals.failed === barcodes.length ? 'FAILED' : 'PARTIAL';
+    const finishedAt = new Date();
+    const configPatch =
+      status === 'SUCCESS'
+        ? { lastSuccessfulSyncAt: finishedAt.toISOString(), lastFailedSyncAt: null }
+        : { lastFailedSyncAt: finishedAt.toISOString() };
     await this.prisma.$transaction([
       this.prisma.automationRun.update({
         where: { id: run.id },
         data: {
           status: status === 'FAILED' ? 'FAILED' : 'SUCCESS',
-          finishedAt: new Date(),
+          finishedAt,
           outputSnapshot: { ...totals, status },
         },
       }),
@@ -341,14 +365,8 @@ export class MesColisService implements OnModuleInit, OnModuleDestroy {
           organizationId_provider: { organizationId, provider: IntegrationProvider.MES_COLIS },
         },
         data: {
-          lastSyncAt: new Date(),
-          ...(totals.failed
-            ? {
-                config: await this.mergedConfig(organizationId, {
-                  lastFailedSyncAt: new Date().toISOString(),
-                }),
-              }
-            : {}),
+          lastSyncAt: finishedAt,
+          config: await this.mergedConfig(organizationId, configPatch),
         },
       }),
     ]);
