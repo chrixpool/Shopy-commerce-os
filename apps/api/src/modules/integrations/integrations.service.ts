@@ -1874,6 +1874,7 @@ async function shopifyFetch<T>(
       'Content-Type': 'application/json',
       'X-Shopify-Access-Token': accessToken,
     },
+    signal: AbortSignal.timeout(20_000),
   });
   const text = await response.text();
   let body: unknown = text;
@@ -1903,6 +1904,7 @@ async function shopifyFetchPage<T>(
       'Content-Type': 'application/json',
       'X-Shopify-Access-Token': accessToken,
     },
+    signal: AbortSignal.timeout(20_000),
   });
   const text = await response.text();
   let body: unknown = text;
@@ -2003,6 +2005,7 @@ async function exchangeShopifyClientCredentials(
       client_id: clientId,
       client_secret: clientSecret,
     }),
+    signal: AbortSignal.timeout(20_000),
   });
   const text = await response.text();
   let body: unknown = text;
