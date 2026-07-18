@@ -2,6 +2,7 @@ import Link from 'next/link';
 import { AuthError } from 'next-auth';
 import { auth, signIn } from '@/lib/auth';
 import { redirect } from 'next/navigation';
+import { FormSubmitButton } from '@/components/ui/form-submit-button';
 
 async function signInAction(locale: string, formData: FormData) {
   'use server';
@@ -40,28 +41,24 @@ export default async function SignInPage({
       <div>
         <p className="eyebrow">Welcome back</p>
         <h1 className="auth-title">Sign in to Shopy</h1>
-        <p className="auth-copy">Use your Shopy workspace owner account.</p>
+        <p className="auth-copy">Use the email and password assigned to your workspace account.</p>
       </div>
 
       <label className="form-field">
         <span>Email</span>
-        <input
-          className="field"
-          name="email"
-          type="email"
-          defaultValue="Oussemawarteni@shopy.com"
-          required
-        />
+        <input className="field" name="email" type="email" autoComplete="email" required />
       </label>
-
-      <div className="auth-helper">
-        <span>Workspace owner</span>
-        <code>Oussemawarteni@shopy.com</code>
-      </div>
 
       <label className="form-field">
         <span>Password</span>
-        <input className="field" name="password" type="password" required minLength={8} />
+        <input
+          className="field"
+          name="password"
+          type="password"
+          autoComplete="current-password"
+          required
+          minLength={8}
+        />
       </label>
 
       {query.error ? (
@@ -70,9 +67,13 @@ export default async function SignInPage({
         </p>
       ) : null}
 
-      <button className="button button-primary button-block" type="submit">
+      <FormSubmitButton
+        className="button button-primary button-block"
+        pendingLabel="Signing in..."
+        type="submit"
+      >
         Sign in
-      </button>
+      </FormSubmitButton>
 
       <p className="auth-footnote">
         New workspace? <Link href={`/${locale}/sign-up`}>Create an account</Link>
